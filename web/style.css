@@ -55,8 +55,8 @@ input[type="checkbox"] {
   width: 16px;
   height: 16px;
   margin: 0;
-  border: 1.5px solid #3a4150;
-  border-radius: 5px;
+  border: 1.5px solid var(--border);
+  border-radius: 4px;
   background: var(--bg-elev2);
   position: relative;
   cursor: pointer;
@@ -442,18 +442,20 @@ input[type="checkbox"]:focus-visible {
 }
 .dl > * { min-width: 0; }
 .dl-gutter { text-align: center; user-select: none; align-self: center; }
+/* GitHub-Desktop-style line toggle: a clean accent checkbox (not red/green),
+   visible only on changed lines; the row background still conveys add/remove. */
 .dl-gutter.on i {
-  width: 12px; height: 12px; border: 1.5px solid #545d6b; border-radius: 3px;
-  display: inline-block; position: relative; vertical-align: middle; background: transparent;
+  width: 13px; height: 13px; border: 1.5px solid var(--text-faint); border-radius: 4px;
+  display: inline-block; position: relative; vertical-align: middle; background: var(--diff-bg);
+  transition: background .1s, border-color .1s;
 }
 .dl.selectable { cursor: pointer; }
-.dl.selectable:hover { filter: brightness(1.25); }
-.dl:not(.off).add .dl-gutter.on i { background: var(--green); border-color: var(--green); }
-.dl:not(.off).del .dl-gutter.on i { background: var(--red); border-color: var(--red); }
-.dl:not(.off).add .dl-gutter.on i::after,
-.dl:not(.off).del .dl-gutter.on i::after {
-  content: ""; position: absolute; left: 3px; top: 0.5px; width: 3px; height: 6px;
-  border: solid var(--diff-bg); border-width: 0 2px 2px 0; transform: rotate(45deg);
+.dl.selectable:hover { filter: brightness(1.12); }
+.dl.selectable:hover .dl-gutter.on i { border-color: var(--accent); }
+.dl:not(.off) .dl-gutter.on i { background: var(--accent); border-color: var(--accent); }
+.dl:not(.off) .dl-gutter.on i::after {
+  content: ""; position: absolute; left: 3.5px; top: 0.5px; width: 3px; height: 6px;
+  border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
 }
 .dl-ln {
   text-align: right; padding-right: 8px; color: var(--text-faint);
@@ -466,10 +468,10 @@ input[type="checkbox"]:focus-visible {
 .dl.add .dl-sign { color: var(--green); }
 .dl.del { background: var(--diff-del); }
 .dl.del .dl-sign { color: var(--red); }
-.dl.ctx .dl-text { color: var(--text-dim); }
-.dl.off .dl-text, .dl.off .dl-sign { opacity: .4; text-decoration: line-through; text-decoration-color: rgba(139,148,158,.4); }
-.dl.off.add { background: rgba(63,185,80,.035); }
-.dl.off.del { background: rgba(248,81,73,.035); }
+.dl.ctx .dl-text { color: var(--text); opacity: .82; }
+.dl.off .dl-text, .dl.off .dl-sign { opacity: .42; }
+.dl.off.add { background: rgba(63,185,80,.04); }
+.dl.off.del { background: rgba(248,81,73,.04); }
 
 /* syntax tokens */
 .t-kw { color: var(--syn-kw); }
@@ -485,6 +487,9 @@ input[type="checkbox"]:focus-visible {
 /* ---------- Modal ---------- */
 .modal { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; }
 .modal[hidden] { display: none; }
+/* Commit-view opens above sheets (e.g. from the History view); dialogs above all. */
+#showModal { z-index: 96; }
+.dialog-modal { z-index: 100; }
 .modal-backdrop { position: absolute; inset: 0; background: rgba(1,4,9,.6); }
 .modal-card {
   position: relative; background: var(--bg-elev); border: 1px solid var(--border);

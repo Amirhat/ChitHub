@@ -795,6 +795,7 @@ function fileRow(f) {
     else if (!f.diff) body.appendChild(el("div", "diff-msg", "No diff."));
     else if (f.diff.binary) body.appendChild(el("div", "diff-msg", "Binary file."));
     else if (f.diff.tooLarge) body.appendChild(el("div", "diff-msg", "Diff too large to display."));
+    else if (diffLineCount(f.diff.hunks) > 4000) body.appendChild(el("div", "diff-msg", `Large diff — ${diffLineCount(f.diff.hunks)} lines. Stage the whole file, or open it in your editor.`));
     else { const lang = langForPath(f.path); for (const h of f.diff.hunks) body.appendChild(hunkView(f, h, f.untracked, lang)); }
     wrap.appendChild(body);
   }
@@ -894,7 +895,9 @@ function diffLines(f, h, readonly, lang) {
     const changed = ln.t === "+" || ln.t === "-";
     const cls = ln.t === "+" ? "add" : ln.t === "-" ? "del" : "ctx";
     const selectable = changed && !readonly;
-    const row = el("div", "dl " + cls + (selectable ? " selectable" : "") + (changed && !ln.sel ? " off" : ""));
+    // `.off` (excluded-from-commit) only applies to selectable diffs — a readonly
+    // commit-view diff must render every line at full contrast.
+    const row = el("div", "dl " + cls + (selectable ? " selectable" : "") + (selectable && !ln.sel ? " off" : ""));
 
     const gutter = el("span", "dl-gutter");
     if (selectable) {
@@ -927,6 +930,12 @@ function noNLBadge() {
   b.textContent = "↵";
   b.title = "No newline at end of file";
   return b;
+}
+
+function diffLineCount(hunks) {
+  let n = 0;
+  for (const h of (hunks || [])) n += h.lines.length;
+  return n;
 }
 
 // buildHunkPatch builds a unified diff containing exactly one hunk's changes,
@@ -1300,6 +1309,7 @@ async function openShow(name, commit) {
       if (fd.binary) body.appendChild(el("div", "diff-msg", "Binary file."));
       else if (fd.tooLarge) body.appendChild(el("div", "diff-msg", "Diff too large to display."));
       else if (!fd.hunks || !fd.hunks.length) body.appendChild(el("div", "diff-msg", "No textual changes (mode, rename, or empty)."));
+      else if (diffLineCount(fd.hunks) > 4000) body.appendChild(el("div", "diff-msg", `Large diff — ${diffLineCount(fd.hunks)} lines. Open the repo in your editor to view it.`));
       else { const lang = langForPath(fd.path); for (const h of fd.hunks) body.appendChild(hunkView(null, h, true, lang)); }
       wrap.appendChild(body);
       card.appendChild(wrap);
@@ -1534,6 +1544,8 @@ let SETTINGS = {
   theme: "dark", lang: "en", defaultPull: "ff", autoFetchMin: 0,
   fontSize: 14, warnMainPush: true, discardToStash: true,
 };
+// The Language/RTL option is hidden in this release (set true to re-enable).
+const SHOW_LANGUAGE = false;
 
 const I18N = {
   fa: {
@@ -1547,7 +1559,7 @@ const I18N = {
 };
 
 function t(key) {
-  const lang = SETTINGS.lang;
+  const lang = effLang();
   if (lang && lang !== "en" && I18N[lang] && I18N[lang][key]) return I18N[lang][key];
   return key;
 }
@@ -1561,12 +1573,15 @@ async function loadSettings() {
 
 function applySettings() {
   const root = document.documentElement;
+  const lang = SHOW_LANGUAGE ? (SETTINGS.lang || "en") : "en";
   root.setAttribute("data-theme", SETTINGS.theme || "dark");
   root.style.fontSize = (SETTINGS.fontSize || 14) + "px";
-  root.lang = SETTINGS.lang || "en";
-  root.dir = SETTINGS.lang === "fa" ? "rtl" : "ltr";
+  root.lang = lang;
+  root.dir = lang === "fa" ? "rtl" : "ltr";
   applyI18n();
 }
+
+function effLang() { return SHOW_LANGUAGE ? (SETTINGS.lang || "en") : "en"; }
 
 function applyI18n() {
   document.querySelectorAll("[data-i18n]").forEach((e) => {
@@ -1596,9 +1611,11 @@ function openSettings() {
   // theme
   const theme = segmented(["dark", "light"], SETTINGS.theme, (v) => { SETTINGS.theme = v; applySettings(); saveSettings(); });
   row("Theme", theme);
-  // language
-  const lang = segmented([["en", "English"], ["fa", "فارسی (RTL)"]], SETTINGS.lang, (v) => { SETTINGS.lang = v; applySettings(); saveSettings(); });
-  row("Language", lang);
+  // language (hidden for this release — the i18n/RTL code stays in place)
+  if (SHOW_LANGUAGE) {
+    const lang = segmented([["en", "English"], ["fa", "فارسی (RTL)"]], SETTINGS.lang, (v) => { SETTINGS.lang = v; applySettings(); saveSettings(); });
+    row("Language", lang);
+  }
   // default pull
   const pull = segmented([["ff", "Fast-forward"], ["rebase", "Rebase"], ["merge", "Merge"]], SETTINGS.defaultPull, (v) => { SETTINGS.defaultPull = v; saveSettings(); });
   row("Default pull", pull);
@@ -1814,6 +1831,7 @@ async function openHistory(name) {
       if (commits.length < 80) state.done = true;
       state.skip += commits.length;
       state.all.push(...commits);
+      if (state.all.length >= 600) state.done = true; // cap infinite scroll
       list.innerHTML = "";
       renderHistory(name, list, state.all);
     } catch (e) { list.innerHTML = ""; list.appendChild(el("div", "sub", "Error: " + esc(e.message))); }
@@ -2241,7 +2259,13 @@ function sheet(opts) {
   const body = el("div", "sheet-body");
   card.appendChild(body);
   backdrop.onclick = finish;
-  const onKey = (e) => { if (e.key === "Escape" && !document.querySelector(".dialog-modal")) { e.preventDefault(); e.stopPropagation(); finish(); } };
+  // Don't close the sheet on Escape while a dialog, the palette, or a commit-view
+  // modal is open on top of it — let that close first.
+  const onKey = (e) => {
+    if (e.key !== "Escape") return;
+    if (document.querySelector(".dialog-modal") || document.querySelector(".palette") || !$("#showModal").hidden) return;
+    e.preventDefault(); e.stopPropagation(); finish();
+  };
   document.addEventListener("keydown", onKey, true);
   modal.appendChild(backdrop); modal.appendChild(card);
   document.body.appendChild(modal);
