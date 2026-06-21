@@ -283,7 +283,7 @@ input[type="checkbox"]:focus-visible {
 .drawer-panel {
   position: absolute;
   top: 0; right: 0; bottom: 0;
-  width: min(560px, 92vw);
+  width: min(680px, 94vw);
   background: var(--bg-elev);
   border-left: 1px solid var(--border);
   box-shadow: var(--shadow);
@@ -402,26 +402,55 @@ input[type="checkbox"]:focus-visible {
 /* ---------- Diff viewer ---------- */
 .diff {
   background: #0a0e14; border: 1px solid var(--border-soft); border-radius: 8px;
-  margin: 0 0 8px 24px; overflow-x: auto; font-size: 12px;
+  margin: 0 0 10px 24px; overflow-x: auto; font-size: 12.5px;
 }
 .diff-msg { padding: 10px 12px; color: var(--text-faint); }
 .hunk { border-bottom: 1px solid #161b22; }
 .hunk:last-child { border-bottom: none; }
 .hunk-head {
   display: flex; align-items: center; gap: 8px;
-  padding: 5px 10px; background: #11161f; position: sticky; left: 0;
+  padding: 6px 10px; background: #11161f; position: sticky; left: 0;
 }
 .hunk-head .hcb { width: 16px; height: 16px; }
 .hunk-header { color: var(--purple); font-size: 11.5px; white-space: pre; }
 .hunk-lines { white-space: pre; }
-.dl { display: flex; min-width: max-content; }
+
+.dl { display: flex; min-width: max-content; line-height: 1.6; }
+/* per-line selection checkbox */
+.dl-check { width: 20px; flex: none; display: flex; align-items: center; justify-content: center; }
+.dl-check i {
+  width: 13px; height: 13px; border: 1.5px solid #3a4150; border-radius: 4px;
+  display: inline-block; position: relative; background: var(--bg-elev2);
+}
+.dl.selectable { cursor: pointer; }
+.dl.selectable:hover { background: #131a26; }
+.dl.selectable:hover .dl-check i { border-color: var(--accent); }
+.dl:not(.off).add .dl-check i { background: var(--green); border-color: var(--green); }
+.dl:not(.off).del .dl-check i { background: var(--red); border-color: var(--red); }
+.dl:not(.off).add .dl-check i::after,
+.dl:not(.off).del .dl-check i::after {
+  content: ""; position: absolute; left: 3.5px; top: 1px; width: 3px; height: 6px;
+  border: solid #0a0e14; border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+/* line-number gutter */
+.dl-ln {
+  width: 42px; flex: none; text-align: right; padding-right: 10px;
+  color: var(--text-faint); font-size: 11px; user-select: none;
+  border-right: 1px solid #161b22;
+}
+.dl-ln:nth-of-type(2) { border-right: none; padding-right: 8px; padding-left: 6px; }
 .dl-sign { width: 16px; flex: none; text-align: center; color: var(--text-faint); user-select: none; }
-.dl-text { padding-right: 14px; }
-.dl.add { background: rgba(63,185,80,.12); }
+.dl-text { padding: 0 16px 0 4px; }
+.dl.add { background: rgba(63,185,80,.1); }
 .dl.add .dl-sign { color: var(--green); }
-.dl.del { background: rgba(248,81,73,.12); }
+.dl.del { background: rgba(248,81,73,.1); }
 .dl.del .dl-sign { color: var(--red); }
 .dl.ctx { color: var(--text-dim); }
+.dl.ctx .dl-text { color: var(--text-dim); }
+.dl.off { opacity: .9; }
+.dl.off .dl-text, .dl.off .dl-sign { opacity: .42; }
+.dl.off.add { background: rgba(63,185,80,.03); }
+.dl.off.del { background: rgba(248,81,73,.03); }
 
 /* ---------- Modal ---------- */
 .modal { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; }
@@ -529,18 +558,6 @@ input[type="checkbox"]:focus-visible {
 .dialog-card { width: min(440px, 92vw); }
 .dialog-msg { color: var(--text-dim); font-size: 13px; line-height: 1.6; margin-bottom: 18px; }
 .dialog-card .field { margin-bottom: 18px; }
-
-/* ---------- Line-level diff selection ---------- */
-.dl-pick {
-  width: 18px; flex: none; text-align: center; font-size: 11px; user-select: none;
-  color: var(--green);
-}
-.dl.del .dl-pick { color: var(--red); }
-.dl.selectable { cursor: pointer; }
-.dl.selectable:hover { filter: brightness(1.3); }
-.dl.off { opacity: .4; }
-.dl.off .dl-pick { color: var(--text-faint); }
-.dl.off.add, .dl.off.del { background: transparent; }
 
 /* ---------- Branch dropdown ---------- */
 .branch-switch { position: relative; }

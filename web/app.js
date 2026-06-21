@@ -793,18 +793,32 @@ function hunkView(f, h, readonly) {
 
 function diffLines(f, h, readonly) {
   const lines = el("div", "hunk-lines mono");
+  const m = (h.header || "").match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+  let oldN = m ? parseInt(m[1], 10) : 0;
+  let newN = m ? parseInt(m[2], 10) : 0;
   for (const ln of h.lines) {
     const changed = ln.t === "+" || ln.t === "-";
     const cls = ln.t === "+" ? "add" : ln.t === "-" ? "del" : "ctx";
     const selectable = changed && !readonly;
     const row = el("div", "dl " + cls + (selectable ? " selectable" : "") + (changed && !ln.sel ? " off" : ""));
+
     if (selectable) {
       row.title = ln.sel ? "Click to exclude this line from the commit" : "Click to include this line";
       row.onclick = () => { ln.sel = !ln.sel; recomputeSel(f); renderDrawer(); };
-      row.appendChild(el("span", "dl-pick", ln.sel ? "✓" : ""));
+      const box = el("span", "dl-check");
+      box.innerHTML = '<i></i>';
+      row.appendChild(box);
     } else {
-      row.appendChild(el("span", "dl-pick"));
+      row.appendChild(el("span", "dl-check empty"));
     }
+
+    let oldStr = "", newStr = "";
+    if (ln.t === " ") { oldStr = oldN++; newStr = newN++; }
+    else if (ln.t === "-") { oldStr = oldN++; }
+    else if (ln.t === "+") { newStr = newN++; }
+    row.appendChild(el("span", "dl-ln", String(oldStr)));
+    row.appendChild(el("span", "dl-ln", String(newStr)));
+
     row.appendChild(el("span", "dl-sign", ln.t === " " ? "" : ln.t));
     row.appendChild(el("span", "dl-text", esc(ln.c) || "&nbsp;"));
     lines.appendChild(row);

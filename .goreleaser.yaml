@@ -44,6 +44,9 @@ checksum:
 # (a PAT with write access to that tap repo).
 brews:
   - name: chithub
+    # Auto-skip the tap push when HOMEBREW_TAP_TOKEN isn't set, so a release
+    # still succeeds (binaries + .dmg) before you've created the tap repo.
+    skip_upload: '{{ if .Env.HOMEBREW_TAP_TOKEN }}false{{ else }}true{{ end }}'
     repository:
       owner: "{{ .Env.GITHUB_REPOSITORY_OWNER }}"
       name: homebrew-tap
