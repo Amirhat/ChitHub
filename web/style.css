@@ -73,23 +73,24 @@ input[type="checkbox"]:indeterminate {
 input[type="checkbox"]:checked::after {
   content: "";
   position: absolute;
-  left: 4.5px;
-  top: 1px;
+  left: 50%;
+  top: 47%;
   width: 4px;
   height: 8px;
   border: solid #fff;
   border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
+  transform: translate(-50%, -50%) rotate(45deg);
 }
 input[type="checkbox"]:indeterminate::after {
   content: "";
   position: absolute;
-  left: 3px;
-  top: 6.5px;
+  left: 50%;
+  top: 50%;
   width: 8px;
   height: 2px;
   background: #fff;
   border-radius: 1px;
+  transform: translate(-50%, -50%);
 }
 input[type="checkbox"]:focus-visible {
   outline: none;
@@ -441,22 +442,18 @@ input[type="checkbox"]:focus-visible {
   line-height: 1.5;
 }
 .dl > * { min-width: 0; }
-.dl-gutter { text-align: center; user-select: none; align-self: center; }
-/* GitHub-Desktop-style line toggle: a clean accent checkbox (not red/green),
-   visible only on changed lines; the row background still conveys add/remove. */
-.dl-gutter.on i {
-  width: 13px; height: 13px; border: 1.5px solid var(--text-faint); border-radius: 4px;
-  display: inline-block; position: relative; vertical-align: middle; background: var(--diff-bg);
-  transition: background .1s, border-color .1s;
-}
+.dl-gutter { user-select: none; align-self: stretch; }
+/* GitHub-Desktop-style selection: an INCLUDED changed line gets a solid blue
+   gutter (the strip + its line numbers) — no per-line checkbox. EXCLUDED lines
+   keep a plain gutter with dimmed content. The whole line is clickable. */
 .dl.selectable { cursor: pointer; }
-.dl.selectable:hover { filter: brightness(1.12); }
-.dl.selectable:hover .dl-gutter.on i { border-color: var(--accent); }
-.dl:not(.off) .dl-gutter.on i { background: var(--accent); border-color: var(--accent); }
-.dl:not(.off) .dl-gutter.on i::after {
-  content: ""; position: absolute; left: 3.5px; top: 0.5px; width: 3px; height: 6px;
-  border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
-}
+.dl.selectable:not(.off) .dl-gutter,
+.dl.selectable:not(.off) .dl-ln { background: var(--accent); }
+.dl.selectable:not(.off) .dl-ln { color: rgba(255, 255, 255, .92); border-right-color: rgba(255, 255, 255, .22); }
+.dl.selectable:not(.off):hover .dl-gutter,
+.dl.selectable:not(.off):hover .dl-ln { background: var(--accent-hover); }
+.dl.selectable.off:hover .dl-gutter,
+.dl.selectable.off:hover .dl-ln { background: rgba(47, 129, 247, .3); }
 .dl-ln {
   text-align: right; padding-right: 8px; color: var(--text-faint);
   font-size: 11px; user-select: none; white-space: nowrap;

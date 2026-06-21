@@ -902,7 +902,8 @@ function diffLines(f, h, readonly, lang) {
     const gutter = el("span", "dl-gutter");
     if (selectable) {
       gutter.classList.add("on");
-      gutter.innerHTML = "<i></i>";
+      // No per-line checkbox: a selected line is shown by a blue gutter (GitHub
+      // Desktop style). The whole changed line is clickable to toggle.
       row.title = ln.sel ? "Click to exclude this line from the commit" : "Click to include this line";
       row.onclick = () => { ln.sel = !ln.sel; recomputeSel(f); renderDrawer(); };
     }
