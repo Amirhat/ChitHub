@@ -9,6 +9,14 @@ Scan a folder, see at a glance how far ahead/behind each repo is, and fetch,
 pull, push, stage and commit — per repo, in bulk, or by stepping through a
 guided **Review** flow.
 
+Highlights: a readable diff with **syntax highlighting** and **word-level diff**,
+line/hunk staging *and* discarding, **one-click Sync** (fetch→pull→push), full
+**history with a commit graph** (revert / cherry-pick / reset / tag), branch
+**merge/rebase** with a **conflict-resolution UI**, multi-repo superpowers
+(**bulk commit**, **bulk branch switch**, **cross-repo search**, **run a command
+everywhere**), a **command palette (⌘K)**, **light/dark themes**, **Persian/RTL**,
+and a live UI that **auto-refreshes** on any git change.
+
 ## Run
 
 ```bash
@@ -67,23 +75,38 @@ deletes anything on disk. The list is saved in `~/.chithub.json`.
 |--------|-------|
 | **Fetch** | `git fetch --all --prune` |
 | **Pull** | fast-forward only (default, safe), `--rebase`, or merge |
-| **Push** | normal, or force push (`--force-with-lease`, confirmed) |
-| **Commit** | full staging area with per-file and per-hunk selection — see below |
+| **Push** | normal, or force push (`--force-with-lease`, confirmed); warns before pushing to `main` |
+| **Sync** | fetch → pull → push in one step (per repo or across selected repos) |
+| **Publish** | push a no-upstream branch and set its tracking remote |
+| **Commit** | full staging area with per-file, per-hunk *and* per-line selection — see below |
+| **Discard** | per-line, per-hunk, per-file or all changes — optionally moved to a recoverable stash |
 | **Amend** | fold the selected changes into the last commit and/or reword it |
 | **Undo last commit** | soft reset `HEAD~1` (changes return to the working tree) |
-| **Branch** | switch via the drawer dropdown, or create a new branch |
+| **Branch** | switch, create, **rename**, **delete** (local/remote), **merge**, **rebase** |
+| **Conflicts** | resolution UI: use ours/theirs, edit, then continue / abort / skip |
+| **History** | full paginated history + commit graph; **revert / cherry-pick / reset / tag / view** |
+| **Tags** | list, create (lightweight or annotated), delete, push |
 | **Stash / Pop** | `git stash push -u` / `git stash pop` |
-| **Discard** | per-file or all changes, confirmed |
 | **Clone** | paste a URL (and optional folder name) |
-| **View commit** | click any commit in the history to see its diff |
-| **Reveal** | open the repo folder in Finder |
+| **Open** | the repo on the web, in your editor, in a terminal, or in Finder |
+
+### Live updates
+
+ChitHub watches the active collection and **refreshes the UI automatically** when
+anything changes on disk (a commit, fetch, branch switch, or an external edit) —
+via a Server-Sent-Events stream, so the manual Refresh button is now optional.
+Turn on **background auto-fetch** in Settings to be notified when upstreams move.
 
 ### Staging area & partial commits
 
 Click a repo to open the staging drawer. Each changed file has a checkbox; click
-a file to expand its **diff**, where each **hunk has its own checkbox** so you
-can commit only part of a file (like `git add -p`). A selective commit rebuilds
+a file to expand its **diff** — rendered with line numbers, **syntax
+highlighting** and **word-level (intra-line) diff**. Every **hunk and every line**
+has its own toggle, so you can commit only part of a file (like `git add -p`), and
+**↕ expand context** to see more surrounding lines. A selective commit rebuilds
 the index to match exactly what you picked, so unselected changes stay untouched.
+The **↩ discard** buttons throw away a single hunk (or file) — moved to a
+recoverable stash by default (toggle in Settings).
 
 ### Review (one repo at a time)
 
@@ -95,10 +118,26 @@ one, so nothing slips through:
 - **Review pulls** — steps through every behind repo, showing the incoming
   commits, and you decide to pull (ff / rebase / merge) or skip.
 
-### Bulk operations
+### Bulk operations (multi-repo superpowers)
 
-Select repos with the checkboxes (or none = "all visible"), then use the top-bar
-**Fetch / Pull▾ / Push▾** buttons. Bulk runs concurrently with a per-repo summary.
+Select repos with the checkboxes (or none = "all visible"). The top-bar
+**Fetch / Pull▾ / Push▾** act on the selection, and a contextual bar at the bottom
+adds the things GitHub Desktop can't do across many repos at once:
+
+- **Bulk commit** — stage and commit every selected dirty repo with one message.
+- **Bulk switch/create branch** — check out (or create) the same branch everywhere.
+- **Sync selected** — fetch→pull→push each selected repo.
+- **Run…** — run a shell command in every selected repo and see the results in a grid.
+- **Cross-repo search** — `git grep` across every repo in the collection (⌘K → Search).
+- **Workspace snapshots** — save which branch each repo is on, and restore it later.
+
+### Command palette, settings & themes
+
+Press **⌘K / Ctrl+K** for a fuzzy command palette (every action + jump to any repo
+or its history). The **⚙ Settings** panel has a **light/dark** theme, a
+**Persian / RTL** language option, default pull mode, background-fetch interval,
+font size, "warn before pushing to main", and "discard → stash". Preferences are
+saved in `~/.chithub.json`.
 
 ## How it works
 
@@ -112,12 +151,17 @@ Select repos with the checkboxes (or none = "all visible"), then use the top-bar
 
 ## Tests
 
-A full end-to-end suite drives the real HTTP API against throwaway git repos
-(local bare repos stand in for remotes, so it runs offline) and asserts the git
-state after every operation — status/scan, the diff endpoint, whole-file and
-**line-level** commits, amend, undo, stash, discard, branch switch + auto-stash,
-clone/fetch/pull/push, collections, the review queues, and commit-view (including
-merge commits). Run it with:
+A full end-to-end suite (26 tests across `e2e_test.go` + `features_test.go`)
+drives the real HTTP API against throwaway git repos (local bare repos stand in
+for remotes, so it runs offline) and asserts the git state after every
+operation — status/scan, the diff endpoint, whole-file / hunk / **line-level**
+commits and **line discard**, expand-context, the **no-newline** marker, amend,
+undo, stash, discard (and discard→stash), branch switch + auto-stash,
+**delete/rename**, **merge + conflict resolution** (ours/continue/abort),
+**revert / cherry-pick / reset**, **tags**, **history graph**, **sync/publish**,
+**bulk commit/checkout**, **cross-repo search**, **snapshots**, **settings**,
+clone/fetch/pull/push, collections, review queues, and commit-view (incl. merge
+commits). Run it with:
 
 ```bash
 go test ./...
@@ -185,11 +229,17 @@ Release with archives, updates the Homebrew tap formula, and attaches a
 
 ```
 main.go        server bootstrap, browser auto-open, embed / -dev disk serving
-handlers.go    JSON HTTP API (repos, collections, review, commit, …)
+handlers.go    core JSON HTTP API (repos, collections, review, commit, diff, …)
+handlers_ext.go  API for the new features (history, tags, conflicts, bulk, …)
 git.go         repo scanning, status parsing, core git operations
 gitext.go      branches, stash, discard, clone, diff, selective/hunk commit,
-               amend, undo, commit-show
-config.go      ~/.chithub.json — collections + active folder
+               amend, undo, commit-show, line discard, no-newline, expand-context
+features.go    sync, publish, branch delete/rename/merge/rebase, history+graph,
+               revert/cherry-pick/reset, blame, tags, conflicts, integrations,
+               multi-repo bulk ops, search, snapshots
+watch.go       Server-Sent-Events live-refresh watcher
+config.go      ~/.chithub.json — collections, active folder, settings
 web/           index.html · style.css · app.js  (embedded UI)
+e2e_test.go · features_test.go   end-to-end test suite (26 tests)
 .goreleaser.yaml · .github/workflows/release.yml · packaging/  (release tooling)
 ```

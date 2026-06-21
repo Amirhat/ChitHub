@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -12,8 +13,9 @@ import (
 // ---- types ----
 
 type DiffLine struct {
-	T string `json:"t"` // " " context, "+" add, "-" del
-	C string `json:"c"`
+	T    string `json:"t"` // " " context, "+" add, "-" del
+	C    string `json:"c"`
+	NoNL bool   `json:"noNL,omitempty"` // this line has no trailing newline ("\ No newline at end of file")
 }
 
 type Hunk struct {
@@ -166,6 +168,24 @@ func stashOp(root, name, action, message string) OpResult {
 	return mkResult(name, "stash", out, err)
 }
 
+// stashDiscard "discards" by stashing instead of hard-deleting, so the changes
+// stay recoverable (Discard → stash safety option). With paths it stashes only
+// those entries; otherwise the whole working tree.
+func stashDiscard(root, name string, paths []string) OpResult {
+	dir := filepath.Join(root, name)
+	args := []string{"stash", "push", "-u", "-m", "chithub: discarded changes"}
+	if len(paths) > 0 {
+		args = append(args, "--")
+		args = append(args, paths...)
+	}
+	out, err := runGit(dir, 30*time.Second, args...)
+	res := mkResult(name, "discard", out, err)
+	if res.OK && res.Output == "" {
+		res.Output = "Moved your changes to a stash — recover them with the Stash ▸ Pop button."
+	}
+	return res
+}
+
 func stashList(root, name string) []string {
 	out, err := runGit(filepath.Join(root, name), 5*time.Second, "stash", "list")
 	if err != nil {
@@ -199,15 +219,29 @@ func deriveName(url, name string) string {
 // ---- diff (display) ----
 
 func fileDiff(root, name, path string) FileDiff {
+	return fileDiffN(root, name, path, 3)
+}
+
+// fileDiffN is fileDiff with a configurable context size (lines around each
+// hunk). A large value (e.g. via the "expand context" button) effectively shows
+// the whole file.
+func fileDiffN(root, name, path string, context int) FileDiff {
 	dir := filepath.Join(root, name)
 	fd := FileDiff{Path: path}
+	if context < 0 {
+		context = 3
+	}
+	if context > 100000 {
+		context = 100000
+	}
+	uflag := "-U" + strconv.Itoa(context)
 
 	var out string
 	if isUntracked(dir, path) {
 		fd.Untracked = true
-		out, _ = runGit(dir, 15*time.Second, "diff", "--no-color", "--no-index", "-U3", "--", "/dev/null", path)
+		out, _ = runGit(dir, 15*time.Second, "diff", "--no-color", "--no-index", uflag, "--", "/dev/null", path)
 	} else {
-		o, err := runGit(dir, 15*time.Second, "diff", "--no-color", "-U3", "HEAD", "--", path)
+		o, err := runGit(dir, 15*time.Second, "diff", "--no-color", uflag, "HEAD", "--", path)
 		if err != nil {
 			fd.Hunks = nil
 			return fd
@@ -257,6 +291,31 @@ func stageSelection(dir string, files []CommitFile) (int, string, error) {
 		touched++
 	}
 	return touched, "", nil
+}
+
+// discardPatch reverse-applies a unified diff to the working tree, throwing away
+// exactly the selected lines/hunks (the inverse of line-level staging). The
+// patch is the forward diff-vs-working-tree of the lines to drop.
+func discardPatch(root, name, patch string) OpResult {
+	dir := filepath.Join(root, name)
+	if strings.TrimSpace(patch) == "" {
+		return OpResult{Repo: name, Action: "discard", OK: false, Output: "Nothing selected to discard."}
+	}
+	if !strings.HasSuffix(patch, "\n") {
+		patch += "\n"
+	}
+	out, err := runGitStdin(dir, 20*time.Second, patch,
+		"apply", "-R", "--whitespace=nowarn", "--recount", "--", "/dev/stdin")
+	// Fall back to stdin marker "-" when /dev/stdin isn't accepted.
+	if err != nil {
+		out, err = runGitStdin(dir, 20*time.Second, patch,
+			"apply", "-R", "--whitespace=nowarn", "--recount", "-")
+	}
+	res := mkResult(name, "discard", out, err)
+	if res.OK && res.Output == "" {
+		res.Output = "Discarded the selected lines."
+	}
+	return res
 }
 
 // commitSelective stages the UI selection, then commits it.
@@ -445,7 +504,16 @@ func hunkToDisplay(idx int, text string) Hunk {
 		h.Header = lines[0]
 	}
 	for _, bl := range lines[1:] {
-		if bl == "" || strings.HasPrefix(bl, "\\") {
+		if bl == "" {
+			continue
+		}
+		// "\ No newline at end of file" annotates the line just emitted; keep the
+		// information so patch rebuilding can re-emit it instead of silently
+		// adding a trailing newline (the "no newline" bug).
+		if strings.HasPrefix(bl, "\\") {
+			if n := len(h.Lines); n > 0 {
+				h.Lines[n-1].NoNL = true
+			}
 			continue
 		}
 		t := " "

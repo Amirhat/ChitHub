@@ -251,38 +251,43 @@ func TestLineLevelCommit(t *testing.T) {
 }
 
 // buildTestPatch mirrors the web UI's buildFilePatch: unselected additions are
-// dropped, unselected deletions become context, counts recomputed.
+// dropped, unselected deletions become context, counts recomputed, and the
+// "\ No newline at end of file" marker is emitted once after the final line (not
+// inline per line, which would corrupt the patch).
 func buildTestPatch(fd map[string]any, keep func(t, c string) bool) string {
 	pre, _ := fd["preamble"].(string)
 	var body strings.Builder
 	re := regexp.MustCompile(`@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
+	var finalNoNL bool
 	for _, hraw := range fd["hunks"].([]any) {
 		h := hraw.(map[string]any)
 		var oldc, newc int
-		var has bool
+		var has, lastNoNL bool
 		var lines []string
+		push := func(s string, noNL bool) { lines = append(lines, s); lastNoNL = noNL }
 		for _, lraw := range h["lines"].([]any) {
 			l := lraw.(map[string]any)
 			tt, _ := l["t"].(string)
 			c, _ := l["c"].(string)
+			noNL, _ := l["noNL"].(bool)
 			switch tt {
 			case " ":
-				lines = append(lines, " "+c)
+				push(" "+c, noNL)
 				oldc++
 				newc++
 			case "+":
 				if keep(tt, c) {
-					lines = append(lines, "+"+c)
+					push("+"+c, noNL)
 					newc++
 					has = true
 				}
 			case "-":
 				if keep(tt, c) {
-					lines = append(lines, "-"+c)
+					push("-"+c, noNL)
 					oldc++
 					has = true
 				} else {
-					lines = append(lines, " "+c)
+					push(" "+c, noNL)
 					oldc++
 					newc++
 				}
@@ -298,9 +303,13 @@ func buildTestPatch(fd map[string]any, keep func(t, c string) bool) string {
 		}
 		body.WriteString(fmt.Sprintf("@@ -%s,%d +%s,%d @@\n", os_, oldc, ns, newc))
 		body.WriteString(strings.Join(lines, "\n") + "\n")
+		finalNoNL = lastNoNL
 	}
 	if body.Len() == 0 {
 		return ""
+	}
+	if finalNoNL {
+		body.WriteString("\\ No newline at end of file\n")
 	}
 	if !strings.HasSuffix(pre, "\n") {
 		pre += "\n"

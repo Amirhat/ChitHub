@@ -14,6 +14,15 @@ jobs:
     # macOS runner so we can also build the .app / .dmg. Pure-Go cross-compiles
     # the Linux + Intel/ARM macOS binaries in the same job.
     runs-on: macos-14
+    # These are optional: set the *_CERT_* / *_NOTARY_* secrets to ship a
+    # Gatekeeper-clean app. When unset, the build falls back to ad-hoc signing.
+    env:
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+      MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+      MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,6 +35,19 @@ jobs:
       - name: Install create-dmg
         run: brew install create-dmg
 
+      - name: Import Developer ID certificate
+        if: env.MACOS_CERT_P12 != ''
+        run: |
+          KEYCHAIN_PASSWORD=actions-ci
+          echo "$MACOS_CERT_P12" | base64 --decode > cert.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -lut 3600 build.keychain
+          security import cert.p12 -k build.keychain -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          rm cert.p12
+
       - name: GoReleaser (binaries, archives, Homebrew tap)
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -37,9 +59,21 @@ jobs:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Build macOS .app and .dmg
+        # make-dmg.sh signs with MACOS_SIGN_IDENTITY when present (hardened
+        # runtime + timestamp), otherwise ad-hoc.
         run: |
           chmod +x packaging/make-dmg.sh
           ./packaging/make-dmg.sh "${{ github.ref_name }}"
+
+      - name: Notarize and staple the .dmg
+        if: env.MACOS_NOTARY_APPLE_ID != ''
+        run: |
+          DMG=$(ls dist/ChitHub-*.dmg | head -1)
+          xcrun notarytool submit "$DMG" \
+            --apple-id "$MACOS_NOTARY_APPLE_ID" \
+            --team-id "$MACOS_NOTARY_TEAM_ID" \
+            --password "$MACOS_NOTARY_PASSWORD" --wait
+          xcrun stapler staple "$DMG"
 
       - name: Attach .dmg to the release
         run: gh release upload "${{ github.ref_name }}" dist/ChitHub-*.dmg --clobber

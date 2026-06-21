@@ -61,7 +61,8 @@ func main() {
 	}
 	saveConfig(cfg)
 
-	app := &App{cfg: cfg}
+	app := &App{cfg: cfg, hub: newHub()}
+	go app.watchLoop()
 
 	mux := http.NewServeMux()
 	app.routes(mux)

@@ -14,9 +14,45 @@ type Config struct {
 	Collections []string `json:"collections"`
 	Active      string   `json:"active"`
 	Port        string   `json:"port"`
+	Settings    Settings `json:"settings"`
 
 	// Root is the legacy single-folder field; migrated into Collections on load.
 	Root string `json:"root,omitempty"`
+}
+
+// Settings holds user preferences exposed in the Settings panel.
+type Settings struct {
+	Theme          string `json:"theme"`          // "dark" | "light"
+	Lang           string `json:"lang"`           // "en" | "fa"
+	DefaultPull    string `json:"defaultPull"`    // "ff" | "rebase" | "merge"
+	AutoFetchMin   int    `json:"autoFetchMin"`   // background fetch interval, 0 = off
+	FontSize       int    `json:"fontSize"`       // base UI font size in px
+	WarnMainPush   bool   `json:"warnMainPush"`   // confirm before pushing to main/master
+	DiscardToStash bool   `json:"discardToStash"` // discard moves changes to a stash instead of deleting
+}
+
+func defaultSettings() Settings {
+	return Settings{
+		Theme: "dark", Lang: "en", DefaultPull: "ff",
+		AutoFetchMin: 0, FontSize: 14, WarnMainPush: true, DiscardToStash: true,
+	}
+}
+
+// normalize fills any zero-valued setting with its default.
+func (s *Settings) normalize() {
+	d := defaultSettings()
+	if s.Theme == "" {
+		s.Theme = d.Theme
+	}
+	if s.Lang == "" {
+		s.Lang = d.Lang
+	}
+	if s.DefaultPull == "" {
+		s.DefaultPull = d.DefaultPull
+	}
+	if s.FontSize == 0 {
+		s.FontSize = d.FontSize
+	}
 }
 
 func configPath() string {
@@ -29,13 +65,25 @@ func configPath() string {
 
 func loadConfig() Config {
 	var c Config
+	fresh := true
 	if b, err := os.ReadFile(configPath()); err == nil {
 		_ = json.Unmarshal(b, &c)
+		fresh = false
 	}
 	if c.Root != "" { // migrate legacy field
 		c.AddCollection(c.Root)
 		c.Root = ""
 	}
+	if fresh || c.Settings.Theme == "" {
+		// First run (or a pre-settings config): seed the full default set so the
+		// boolean toggles get their intended `true` defaults.
+		s := defaultSettings()
+		if c.Settings.DefaultPull != "" {
+			s.DefaultPull = c.Settings.DefaultPull
+		}
+		c.Settings = s
+	}
+	c.Settings.normalize()
 	return c
 }
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -12,6 +13,7 @@ import (
 type App struct {
 	mu  sync.RWMutex
 	cfg Config
+	hub *hub
 }
 
 func (a *App) root() string {
@@ -39,10 +41,55 @@ func (a *App) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/repo/{name}/show", a.handleShow)
 	mux.HandleFunc("POST /api/repo/{name}/checkout", a.handleCheckout)
 	mux.HandleFunc("POST /api/repo/{name}/discard", a.handleDiscard)
+	mux.HandleFunc("POST /api/repo/{name}/discard-patch", a.handleDiscardPatch)
 	mux.HandleFunc("POST /api/repo/{name}/stash", a.handleStash)
 	mux.HandleFunc("POST /api/repo/{name}/reveal", a.handleReveal)
 	mux.HandleFunc("POST /api/clone", a.handleClone)
 	mux.HandleFunc("POST /api/batch", a.handleBatch)
+
+	// live updates + preferences
+	mux.HandleFunc("GET /api/events", a.handleEvents)
+	mux.HandleFunc("GET /api/settings", a.handleGetSettings)
+	mux.HandleFunc("POST /api/settings", a.handleSetSettings)
+	mux.HandleFunc("GET /api/update-check", a.handleUpdateCheck)
+
+	// branch operations
+	mux.HandleFunc("POST /api/repo/{name}/publish", a.handlePublish)
+	mux.HandleFunc("POST /api/repo/{name}/branch-delete", a.handleBranchDelete)
+	mux.HandleFunc("POST /api/repo/{name}/branch-rename", a.handleBranchRename)
+	mux.HandleFunc("POST /api/repo/{name}/merge", a.handleMerge)
+	mux.HandleFunc("POST /api/repo/{name}/rebase", a.handleRebase)
+	mux.HandleFunc("POST /api/repo/{name}/sync", a.handleSync)
+
+	// history
+	mux.HandleFunc("GET /api/repo/{name}/history", a.handleHistory)
+	mux.HandleFunc("POST /api/repo/{name}/revert", a.handleRevert)
+	mux.HandleFunc("POST /api/repo/{name}/cherry-pick", a.handleCherryPick)
+	mux.HandleFunc("POST /api/repo/{name}/reset", a.handleReset)
+	mux.HandleFunc("GET /api/repo/{name}/blame", a.handleBlame)
+
+	// tags
+	mux.HandleFunc("GET /api/repo/{name}/tags", a.handleTags)
+	mux.HandleFunc("POST /api/repo/{name}/tag", a.handleTag)
+
+	// conflicts / sequencer
+	mux.HandleFunc("GET /api/repo/{name}/conflicts", a.handleConflicts)
+	mux.HandleFunc("GET /api/repo/{name}/conflict", a.handleConflict)
+	mux.HandleFunc("POST /api/repo/{name}/resolve", a.handleResolve)
+	mux.HandleFunc("POST /api/repo/{name}/sequencer", a.handleSequencer)
+
+	// integrations
+	mux.HandleFunc("POST /api/repo/{name}/open", a.handleOpen)
+	mux.HandleFunc("GET /api/repo/{name}/ci", a.handleCI)
+	mux.HandleFunc("POST /api/repo/{name}/pr", a.handlePR)
+
+	// multi-repo
+	mux.HandleFunc("POST /api/bulk/commit", a.handleBulkCommit)
+	mux.HandleFunc("POST /api/bulk/checkout", a.handleBulkCheckout)
+	mux.HandleFunc("GET /api/search", a.handleSearch)
+	mux.HandleFunc("GET /api/snapshot", a.handleSnapshot)
+	mux.HandleFunc("POST /api/snapshot/restore", a.handleSnapshotRestore)
+	mux.HandleFunc("POST /api/run", a.handleRun)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -198,7 +245,13 @@ func (a *App) handleDiff(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path is required"})
 		return
 	}
-	writeJSON(w, http.StatusOK, fileDiff(a.root(), name, path))
+	context := 3
+	if c := r.URL.Query().Get("context"); c != "" {
+		if n, err := strconv.Atoi(c); err == nil {
+			context = n
+		}
+	}
+	writeJSON(w, http.StatusOK, fileDiffN(a.root(), name, path, context))
 }
 
 func (a *App) handleBranches(w http.ResponseWriter, r *http.Request) {
@@ -280,10 +333,28 @@ func (a *App) handleDiscard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Paths []string `json:"paths"`
+		Paths   []string `json:"paths"`
+		ToStash bool     `json:"toStash"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	if body.ToStash {
+		writeJSON(w, http.StatusOK, stashDiscard(a.root(), name, body.Paths))
+		return
+	}
 	writeJSON(w, http.StatusOK, discardChanges(a.root(), name, body.Paths))
+}
+
+func (a *App) handleDiscardPatch(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !a.validRepo(name) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown repo"})
+		return
+	}
+	var body struct {
+		Patch string `json:"patch"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	writeJSON(w, http.StatusOK, discardPatch(a.root(), name, body.Patch))
 }
 
 func (a *App) handleStash(w http.ResponseWriter, r *http.Request) {

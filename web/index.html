@@ -28,7 +28,7 @@
 
     <div class="global-actions">
       <div class="split">
-        <button id="reviewBtn" class="btn accent" title="Step through repos that need a commit or push">▶ Review</button>
+        <button id="reviewBtn" class="btn accent" title="Step through repos that need a commit or push">▶ <span data-i18n="review">Review</span></button>
         <button id="reviewMenuBtn" class="btn accent caret" title="Review options">▾</button>
         <div class="menu" id="reviewMenu" hidden>
           <button data-mode="commit">Review commits &amp; pushes</button>
@@ -36,14 +36,16 @@
         </div>
       </div>
       <button id="cloneBtn" class="btn ghost" title="Clone a repository into this folder">
-        <span class="ic">＋</span> Clone
+        <span class="ic">＋</span> <span data-i18n="clone">Clone</span>
       </button>
+      <button id="paletteBtn" class="btn ghost" title="Command palette (⌘K / Ctrl+K)" data-i18n="palette">⌘K</button>
       <button id="refreshBtn" class="btn ghost" title="Rescan all repositories (R)">
-        <span class="ic">⟳</span> Refresh
+        <span class="ic">⟳</span> <span data-i18n="refresh">Refresh</span>
       </button>
-      <button id="fetchAllBtn" class="btn" title="Fetch selected repos">Fetch</button>
+      <button id="settingsBtn" class="btn ghost iconbtn" title="Settings">⚙</button>
+      <button id="fetchAllBtn" class="btn" title="Fetch selected repos" data-i18n="fetch">Fetch</button>
       <div class="split">
-        <button id="pullAllBtn" class="btn primary">Pull</button>
+        <button id="pullAllBtn" class="btn primary" data-i18n="pull">Pull</button>
         <button id="pullAllMenuBtn" class="btn primary caret" title="Pull options">▾</button>
         <div class="menu" id="pullAllMenu" hidden>
           <button data-mode="ff">Pull (fast-forward only)</button>
@@ -52,7 +54,7 @@
         </div>
       </div>
       <div class="split">
-        <button id="pushAllBtn" class="btn">Push</button>
+        <button id="pushAllBtn" class="btn" data-i18n="push">Push</button>
         <button id="pushAllMenuBtn" class="btn caret" title="Push options">▾</button>
         <div class="menu" id="pushAllMenu" hidden>
           <button data-force="false">Push</button>
@@ -67,11 +69,11 @@
       <input type="checkbox" id="selectAll" /> <span id="selectCount">Select all</span>
     </label>
     <div class="filters" id="filters">
-      <button class="chip active" data-filter="all">All</button>
-      <button class="chip" data-filter="attention">Needs attention</button>
-      <button class="chip" data-filter="behind">Behind</button>
-      <button class="chip" data-filter="ahead">Ahead</button>
-      <button class="chip" data-filter="dirty">Dirty</button>
+      <button class="chip active" data-filter="all" data-i18n="All">All</button>
+      <button class="chip" data-filter="attention" data-i18n="Needs attention">Needs attention</button>
+      <button class="chip" data-filter="behind" data-i18n="Behind">Behind</button>
+      <button class="chip" data-filter="ahead" data-i18n="Ahead">Ahead</button>
+      <button class="chip" data-filter="dirty" data-i18n="Dirty">Dirty</button>
     </div>
     <input type="search" id="search" class="search" placeholder="Filter by name…" />
   </div>

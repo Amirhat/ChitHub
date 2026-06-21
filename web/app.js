@@ -171,7 +171,8 @@ function render() {
   const allVisibleSel = visible.length > 0 && visible.every((r) => SELECTED.has(r.name));
   $("#selectAll").checked = allVisibleSel;
   const n = SELECTED.size;
-  $("#selectCount").textContent = n ? `${n} selected` : "Select all";
+  $("#selectCount").textContent = n ? `${n} selected` : t("Select all");
+  renderBulkBar();
 }
 
 function renderStats() {
@@ -220,27 +221,39 @@ function renderRepo(r) {
   main.appendChild(meta);
 
   const actions = el("div", "repo-actions");
-  actions.appendChild(actBtn("Fetch", "ghost", () => doOp(r.name, "fetch")));
-  actions.appendChild(splitButton("Pull", "primary", () => doPull(r.name, "ff"), [
+  const sync = actBtn(t("sync"), "ghost", () => doSync(r.name));
+  sync.title = "Fetch, then pull and push in one step";
+  actions.appendChild(sync);
+  actions.appendChild(splitButton(t("pull"), "primary", () => doPull(r.name, "ff"), [
     { label: "Pull (fast-forward only)", fn: () => doPull(r.name, "ff") },
     { label: "Pull --rebase", fn: () => doPull(r.name, "rebase") },
     { label: "Pull (merge)", fn: () => doPull(r.name, "merge") },
   ]));
-  actions.appendChild(splitButton("Push", "", () => doPush(r.name, false), [
-    { label: "Push", fn: () => doPush(r.name, false) },
-    { label: "Force push (--force-with-lease)", fn: () => doPush(r.name, true), danger: true },
-  ]));
+  if (r.state === "no-upstream") {
+    actions.appendChild(actBtn(t("publish"), "", () => doPublish(r.name)));
+  } else {
+    actions.appendChild(splitButton(t("push"), "", () => doPush(r.name, false), [
+      { label: "Push", fn: () => doPush(r.name, false) },
+      { label: "Force push (--force-with-lease)", fn: () => doPush(r.name, true), danger: true },
+    ]));
+  }
   if (r.dirty) {
-    const c = actBtn("Commit…", "ghost", () => openDrawer(r.name, { commit: true }));
+    const c = actBtn(t("commit") + "…", "ghost", () => openDrawer(r.name, { commit: true }));
     c.style.color = "var(--orange)";
     actions.appendChild(c);
   }
   const more = actBtn("⋯", "ghost more", null);
   actions.appendChild(attachMenu(more, [
     { label: "Open details", fn: () => openDrawer(r.name, { commit: true }) },
-    { label: "Reveal in Finder", fn: () => doReveal(r.name) },
+    { label: "History…", fn: () => openHistory(r.name) },
     { label: "New branch…", fn: () => newBranch(r.name) },
+    { label: "—", sep: true },
+    { label: "Open on web", fn: () => doOpen(r.name, "web") },
+    { label: "Open in editor", fn: () => doOpen(r.name, "editor") },
+    { label: "Open in terminal", fn: () => doOpen(r.name, "terminal") },
+    { label: "Reveal in Finder", fn: () => doReveal(r.name) },
     ...(r.dirty ? [
+      { label: "—", sep: true },
       { label: "Stash changes", fn: () => doStash(r.name, "push") },
       { label: "Discard all changes…", fn: () => doDiscardAll(r.name), danger: true },
     ] : []),
@@ -305,6 +318,7 @@ function attachMenu(btn, items) {
   const menu = el("div", "menu");
   menu.hidden = true;
   for (const it of items) {
+    if (it.sep) { menu.appendChild(el("div", "menu-sep")); continue; }
     const b = el("button", it.danger ? "danger-item" : "", esc(it.label));
     b.onclick = (e) => { e.stopPropagation(); menu.hidden = true; it.fn(); };
     menu.appendChild(b);
@@ -348,6 +362,12 @@ async function doPush(name, force) {
   if (force && !(await confirmDialog("Force push",
     `Force-push ${name}? This rewrites remote history (uses --force-with-lease).`,
     { okLabel: "Force push", danger: true }))) return;
+  const r = REPOS.find((x) => x.name === name);
+  const branch = (r && r.branch) || (DRAWER && DRAWER.name === name && DRAWER.branches && DRAWER.branches.current) || "";
+  if (SETTINGS.warnMainPush && /^(main|master|trunk|production|release)$/.test(branch) &&
+    !(await confirmDialog("Push to " + branch,
+      `You're about to push directly to the protected branch “${branch}”. Continue?`,
+      { okLabel: "Push to " + branch }))) return;
   return runOp(name, `push ${name}`, () => api("POST", `/api/repo/${enc(name)}/push`, { force }));
 }
 const doStash = (name, action) =>
@@ -358,10 +378,11 @@ async function doReveal(name) {
   catch (e) { toast("err", "Reveal failed", e.message); }
 }
 async function doDiscardAll(name) {
-  if (!(await confirmDialog("Discard all changes",
-    `Discard ALL local changes in ${name}?\nThis can't be undone.`,
-    { okLabel: "Discard all", danger: true }))) return;
-  return runOp(name, `discard all · ${name}`, () => api("POST", `/api/repo/${enc(name)}/discard`, {}));
+  const toStash = SETTINGS.discardToStash;
+  const note = toStash ? "Move ALL local changes in {n} to a stash (recoverable)?" : "Discard ALL local changes in {n}?\nThis can't be undone.";
+  if (!(await confirmDialog(toStash ? "Stash all changes" : "Discard all changes",
+    note.replace("{n}", name), { okLabel: toStash ? "Stash all" : "Discard all", danger: !toStash }))) return;
+  return runOp(name, `discard all · ${name}`, () => api("POST", `/api/repo/${enc(name)}/discard`, { toStash }));
 }
 async function doUndo(name) {
   if (!(await confirmDialog("Undo last commit",
@@ -396,11 +417,11 @@ function selectedOrAll() {
   if (SELECTED.size) return [...SELECTED];
   return REPOS.filter(passesFilter).map((r) => r.name);
 }
-async function batch(action, extra) {
+async function batch(action, extra, quiet) {
   const repos = selectedOrAll();
-  if (!repos.length) { toast("err", "Nothing to do", "No repositories selected."); return; }
+  if (!repos.length) { if (!quiet) toast("err", "Nothing to do", "No repositories selected."); return; }
   const label = SELECTED.size ? `${repos.length} selected` : "all visible";
-  const t = toast("run", `${action} → ${label}`, `running on ${repos.length} repos…`);
+  const tn = quiet ? null : toast("run", `${action} → ${label}`, `running on ${repos.length} repos…`);
   repos.forEach((n) => setBusy(n, true));
   try {
     const data = await api("POST", "/api/batch", { action, repos, ...extra });
@@ -409,9 +430,9 @@ async function batch(action, extra) {
     const fail = results.length - ok;
     const lines = results.filter((r) => !r.ok)
       .map((r) => `✗ ${r.repo}: ${firstLine(r.output)}`).join("\n");
-    finishToast(t, { ok: fail === 0, output: `${ok} ok, ${fail} failed${lines ? "\n\n" + lines : ""}` });
+    if (tn) finishToast(tn, { ok: fail === 0, output: `${ok} ok, ${fail} failed${lines ? "\n\n" + lines : ""}` });
   } catch (e) {
-    finishToast(t, { ok: false, output: e.message });
+    if (tn) finishToast(tn, { ok: false, output: e.message });
   } finally {
     repos.forEach((n) => setBusy(n, false));
     await load();
@@ -424,9 +445,10 @@ function toggleSelect(name, on) {
   const row = document.querySelector(`.repo[data-name="${cssEsc(name)}"]`);
   if (row) row.classList.toggle("sel", on);
   const n = SELECTED.size;
-  $("#selectCount").textContent = n ? `${n} selected` : "Select all";
+  $("#selectCount").textContent = n ? `${n} selected` : t("Select all");
   const visible = REPOS.filter(passesFilter);
   $("#selectAll").checked = visible.length > 0 && visible.every((r) => SELECTED.has(r.name));
+  renderBulkBar();
 }
 
 // ---------- Review wizard ----------
@@ -507,12 +529,19 @@ async function reloadDrawer(name, view) {
       branches: data.branches || { local: [], current: data.info.branch },
       stashes: data.stashes || [],
       draftMsg: prevMsg || "",
+      conflicts: null,
       files: (data.files || []).map((f) => ({
         path: f.path, code: f.code, untracked: f.code.includes("?"),
         sel: "all", expanded: false, loading: false,
       })),
     };
     renderDrawer();
+    if (data.info && data.info.conflicts > 0) {
+      try {
+        const cs = await api("GET", `/api/repo/${enc(name)}/conflicts`);
+        if (DRAWER && DRAWER.name === name) { DRAWER.conflicts = cs; renderDrawer(); }
+      } catch { /* ignore */ }
+    }
   } catch (e) {
     $("#drawerPanel").innerHTML = `<div class="sub">Error: ${esc(e.message)}</div>`;
   }
@@ -577,7 +606,8 @@ function branchBar() {
   bar.appendChild(barBtn("＋ Branch", () => newBranch(d.name)));
   bar.appendChild(barBtn("Stash", () => doStashDrawer("push")));
   if (d.stashes.length) bar.appendChild(barBtn(`Pop (${d.stashes.length})`, () => doStashDrawer("pop")));
-  bar.appendChild(barBtn("Reveal", () => doReveal(d.name)));
+  const more = el("button", "btn small ghost", "Branch ⋯");
+  bar.appendChild(attachMenu(more, branchMenuItems(d)));
   return bar;
 }
 
@@ -621,6 +651,7 @@ async function checkoutRemote(local, remoteRef) {
 function syncRow() {
   const d = DRAWER;
   const row = el("div", "sync-row");
+  row.appendChild(actBtn("Sync", "accent", () => doSync(d.name)));
   row.appendChild(actBtn("Fetch", "ghost", () => doOp(d.name, "fetch")));
   row.appendChild(splitButton("Pull", "", () => doPull(d.name, "ff"), [
     { label: "Pull (fast-forward only)", fn: () => doPull(d.name, "ff") },
@@ -640,6 +671,14 @@ function renderStaging() {
   panel.innerHTML = "";
   panel.appendChild(drawerHead());
   panel.appendChild(branchBar());
+  if (d.conflicts && d.conflicts.files && d.conflicts.files.length) {
+    const banner = el("div", "conflict-banner inline");
+    banner.appendChild(el("span", null, `⚠ ${d.conflicts.files.length} conflicted file(s) — a ${d.conflicts.inProgress || "merge"} is in progress.`));
+    const btn = el("button", "btn small primary", "Resolve…");
+    btn.onclick = () => openConflicts(d.name);
+    banner.appendChild(btn);
+    panel.appendChild(banner);
+  }
   panel.appendChild(syncRow());
 
   const files = d.files;
@@ -739,9 +778,12 @@ function fileRow(f) {
   disc.title = "Discard this file";
   disc.onclick = async (e) => {
     e.stopPropagation();
-    if (!(await confirmDialog("Discard changes", `Discard all changes in ${f.path}?\nThis can't be undone.`, { okLabel: "Discard", danger: true }))) return;
+    const toStash = SETTINGS.discardToStash;
+    if (!(await confirmDialog(toStash ? "Stash changes" : "Discard changes",
+      toStash ? `Move changes in ${f.path} to a stash (recoverable)?` : `Discard all changes in ${f.path}?\nThis can't be undone.`,
+      { okLabel: toStash ? "Stash" : "Discard", danger: !toStash }))) return;
     await runOp(DRAWER.name, `discard ${f.path}`,
-      () => api("POST", `/api/repo/${enc(DRAWER.name)}/discard`, { paths: [f.path] }));
+      () => api("POST", `/api/repo/${enc(DRAWER.name)}/discard`, { paths: [f.path], toStash }));
   };
   tools.appendChild(disc);
   head.appendChild(tools);
@@ -753,7 +795,7 @@ function fileRow(f) {
     else if (!f.diff) body.appendChild(el("div", "diff-msg", "No diff."));
     else if (f.diff.binary) body.appendChild(el("div", "diff-msg", "Binary file."));
     else if (f.diff.tooLarge) body.appendChild(el("div", "diff-msg", "Diff too large to display."));
-    else for (const h of f.diff.hunks) body.appendChild(hunkView(f, h, f.untracked));
+    else { const lang = langForPath(f.path); for (const h of f.diff.hunks) body.appendChild(hunkView(f, h, f.untracked, lang)); }
     wrap.appendChild(body);
   }
   return wrap;
@@ -767,7 +809,7 @@ function hunkSelState(h) {
   return on === 0 ? "none" : "partial";
 }
 
-function hunkView(f, h, readonly) {
+function hunkView(f, h, readonly, lang) {
   const block = el("div", "hunk");
   const hh = el("div", "hunk-head");
   if (!readonly) {
@@ -776,6 +818,7 @@ function hunkView(f, h, readonly) {
     const st = hunkSelState(h);
     cb.checked = st !== "none";
     cb.indeterminate = st === "partial";
+    cb.title = "Stage / unstage this whole hunk";
     cb.onclick = (e) => {
       e.stopPropagation();
       const on = cb.checked;
@@ -786,13 +829,64 @@ function hunkView(f, h, readonly) {
     hh.appendChild(cb);
   }
   hh.appendChild(el("span", "hunk-header mono", esc(h.header)));
+  // Expand more context above/below this hunk.
+  if (f && !f.untracked && !readonly) {
+    const tools = el("span", "hunk-tools");
+    const exp = el("button", "icbtn", "↕");
+    exp.title = "Show more surrounding lines";
+    exp.onclick = (e) => { e.stopPropagation(); expandContext(f); };
+    tools.appendChild(exp);
+    const disc = el("button", "icbtn danger", "↩");
+    disc.title = "Discard this hunk";
+    disc.onclick = (e) => { e.stopPropagation(); discardHunk(f, h); };
+    tools.appendChild(disc);
+    hh.appendChild(tools);
+  }
   block.appendChild(hh);
-  block.appendChild(diffLines(f, h, readonly));
+  block.appendChild(diffLines(f, h, readonly, lang));
   return block;
 }
 
-function diffLines(f, h, readonly) {
-  const lines = el("div", "hunk-lines mono");
+// computeWordDiff annotates paired -/+ lines in a hunk with the [start,end)
+// char range that actually changed, so the renderer can highlight just that
+// span (word-level diff) instead of the whole line.
+function computeWordDiff(h) {
+  const L = h.lines;
+  let i = 0;
+  while (i < L.length) {
+    if (L[i].t !== "-") { i++; continue; }
+    let dStart = i;
+    while (i < L.length && L[i].t === "-") i++;
+    let aStart = i;
+    while (i < L.length && L[i].t === "+") i++;
+    const dels = L.slice(dStart, aStart), adds = L.slice(aStart, i);
+    const n = Math.min(dels.length, adds.length);
+    for (let k = 0; k < n; k++) {
+      const r = intraLineDiff(dels[k].c, adds[k].c);
+      if (r) { dels[k]._wd = r.a; adds[k]._wd = r.b; }
+    }
+  }
+}
+
+// intraLineDiff returns the differing middle range of two strings by trimming
+// the common prefix and suffix. Returns null when they're identical or the
+// change spans almost the whole line (where a word highlight adds no clarity).
+function intraLineDiff(a, b) {
+  if (a === b) return null;
+  let p = 0;
+  const max = Math.min(a.length, b.length);
+  while (p < max && a[p] === b[p]) p++;
+  let s = 0;
+  while (s < max - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+  const aMid = a.length - p - s, bMid = b.length - p - s;
+  // Skip when nearly everything changed (no useful signal).
+  if (aMid > a.length * 0.8 && bMid > b.length * 0.8 && a.length > 6) return null;
+  return { a: [p, a.length - s], b: [p, b.length - s] };
+}
+
+function diffLines(f, h, readonly, lang) {
+  computeWordDiff(h);
+  const lines = el("div", "hunk-lines");
   const m = (h.header || "").match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
   let oldN = m ? parseInt(m[1], 10) : 0;
   let newN = m ? parseInt(m[2], 10) : 0;
@@ -802,15 +896,14 @@ function diffLines(f, h, readonly) {
     const selectable = changed && !readonly;
     const row = el("div", "dl " + cls + (selectable ? " selectable" : "") + (changed && !ln.sel ? " off" : ""));
 
+    const gutter = el("span", "dl-gutter");
     if (selectable) {
+      gutter.classList.add("on");
+      gutter.innerHTML = "<i></i>";
       row.title = ln.sel ? "Click to exclude this line from the commit" : "Click to include this line";
       row.onclick = () => { ln.sel = !ln.sel; recomputeSel(f); renderDrawer(); };
-      const box = el("span", "dl-check");
-      box.innerHTML = '<i></i>';
-      row.appendChild(box);
-    } else {
-      row.appendChild(el("span", "dl-check empty"));
     }
+    row.appendChild(gutter);
 
     let oldStr = "", newStr = "";
     if (ln.t === " ") { oldStr = oldN++; newStr = newN++; }
@@ -818,12 +911,183 @@ function diffLines(f, h, readonly) {
     else if (ln.t === "+") { newStr = newN++; }
     row.appendChild(el("span", "dl-ln", String(oldStr)));
     row.appendChild(el("span", "dl-ln", String(newStr)));
+    row.appendChild(el("span", "dl-sign", ln.t === "+" ? "+" : ln.t === "-" ? "−" : ""));
 
-    row.appendChild(el("span", "dl-sign", ln.t === " " ? "" : ln.t));
-    row.appendChild(el("span", "dl-text", esc(ln.c) || "&nbsp;"));
+    const text = el("span", "dl-text");
+    text.innerHTML = renderCode(ln.c, lang, ln._wd) || "&nbsp;";
+    if (ln.noNL) text.appendChild(noNLBadge());
+    row.appendChild(text);
     lines.appendChild(row);
   }
   return lines;
+}
+
+function noNLBadge() {
+  const b = el("span", "nonl");
+  b.textContent = "↵";
+  b.title = "No newline at end of file";
+  return b;
+}
+
+// buildHunkPatch builds a unified diff containing exactly one hunk's changes,
+// used to discard that hunk (the patch is reverse-applied to the working tree).
+function buildHunkPatch(f, hunk) {
+  if (!f.diff || !f.diff.preamble) return null;
+  let oldc = 0, newc = 0, has = false;
+  const lines = [];
+  const push = (s, ln) => { lines.push(s); if (ln.noNL) lines.push("\\ No newline at end of file"); };
+  for (const ln of hunk.lines) {
+    if (ln.t === " ") { push(" " + ln.c, ln); oldc++; newc++; }
+    else if (ln.t === "+") { push("+" + ln.c, ln); newc++; has = true; }
+    else if (ln.t === "-") { push("-" + ln.c, ln); oldc++; has = true; }
+  }
+  if (!has) return null;
+  const m = hunk.header.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+  const oldStart = m ? m[1] : "1", newStart = m ? m[2] : "1";
+  let pre = f.diff.preamble;
+  if (!pre.endsWith("\n")) pre += "\n";
+  return pre + `@@ -${oldStart},${oldc} +${newStart},${newc} @@\n` + lines.join("\n") + "\n";
+}
+
+async function discardHunk(f, hunk) {
+  if (!(await confirmDialog("Discard hunk",
+    `Discard this hunk's changes in ${f.path}?\nThis can't be undone.`, { okLabel: "Discard hunk", danger: true }))) return;
+  const patch = buildHunkPatch(f, hunk);
+  if (!patch) { toast("err", "Discard failed", "Could not build the patch."); return; }
+  await runOp(DRAWER.name, `discard hunk · ${f.path}`,
+    () => api("POST", `/api/repo/${enc(DRAWER.name)}/discard-patch`, { patch }));
+}
+
+async function expandContext(f) {
+  f.context = (f.context || 3) + 25;
+  try {
+    const fresh = await api("GET", `/api/repo/${enc(DRAWER.name)}/diff?path=${enc(f.path)}&context=${f.context}`);
+    // Preserve per-line selection POSITIONALLY: expanding context only adds
+    // context lines, so the ordered sequence of +/- lines is stable. (A content
+    // hash would wrongly collapse duplicate identical changed lines.)
+    const sels = [];
+    for (const h of (f.diff.hunks || [])) for (const ln of h.lines)
+      if (ln.t === "+" || ln.t === "-") sels.push(ln.sel);
+    f.diff = fresh;
+    let i = 0;
+    for (const h of (f.diff.hunks || [])) for (const ln of h.lines)
+      if (ln.t === "+" || ln.t === "-") { ln.sel = i < sels.length ? sels[i] : true; i++; }
+    recomputeSel(f);
+    renderDrawer();
+  } catch (e) { toast("err", "Expand failed", e.message); }
+}
+
+// ---------- Syntax highlighting + word-level diff ----------
+const KW = ("if else elif endif for foreach while do done then fi return func function fn def end " +
+  "var let const class struct interface enum type typedef union namespace module mod package import " +
+  "export from as use using require include new delete this self super public private protected internal " +
+  "static final abstract virtual override extends implements throws throw try catch finally except raise " +
+  "switch case default break continue goto async await yield defer go chan select range map make panic recover " +
+  "void int int8 int16 int32 int64 uint uint8 uint16 uint32 uint64 float float32 float64 double bool boolean " +
+  "string str char byte rune any object number symbol bigint null nil none true false undefined NaN " +
+  "and or not in is of with lambda pass print echo def fn impl trait mut pub where match when unless begin " +
+  "let const readonly typeof instanceof keyof infer declare extends implements")
+  .split(/\s+/).reduce((s, w) => (w && s.add(w), s), new Set());
+
+const CSTYLE = { line: ["//"], block: ["/*", "*/"], strings: ["\"", "'", "`"], kw: KW };
+const HASH = { line: ["#"], block: null, strings: ["\"", "'"], kw: KW };
+const SQL = { line: ["--"], block: ["/*", "*/"], strings: ["'", "\""], kw: KW };
+const JSONC = { line: [], block: null, strings: ["\""], kw: new Set(["true", "false", "null"]) };
+const PLAIN = { line: [], block: null, strings: [], kw: new Set() };
+
+const EXT_LANG = {
+  go: CSTYLE, js: CSTYLE, jsx: CSTYLE, ts: CSTYLE, tsx: CSTYLE, mjs: CSTYLE, cjs: CSTYLE,
+  c: CSTYLE, h: CSTYLE, cpp: CSTYLE, cc: CSTYLE, hpp: CSTYLE, cs: CSTYLE, java: CSTYLE,
+  kt: CSTYLE, kts: CSTYLE, swift: CSTYLE, rs: CSTYLE, scala: CSTYLE, dart: CSTYLE, php: CSTYLE,
+  proto: CSTYLE, css: CSTYLE, scss: CSTYLE, less: CSTYLE, m: CSTYLE, mm: CSTYLE, groovy: CSTYLE,
+  py: HASH, rb: HASH, sh: HASH, bash: HASH, zsh: HASH, fish: HASH, yaml: HASH, yml: HASH,
+  toml: HASH, ini: HASH, conf: HASH, cfg: HASH, env: HASH, dockerfile: HASH, makefile: HASH,
+  pl: HASH, r: HASH, tf: HASH, hcl: HASH, properties: HASH, gitignore: HASH,
+  sql: SQL, json: JSONC, json5: JSONC,
+  md: PLAIN, markdown: PLAIN, txt: PLAIN, html: PLAIN, xml: PLAIN, svg: PLAIN, csv: PLAIN, lock: PLAIN,
+};
+
+function langForPath(path) {
+  if (!path) return CSTYLE;
+  const base = path.split("/").pop().toLowerCase();
+  if (base === "dockerfile") return HASH;
+  if (base === "makefile") return HASH;
+  const dot = base.lastIndexOf(".");
+  const ext = dot >= 0 ? base.slice(dot + 1) : base;
+  return EXT_LANG[ext] || CSTYLE;
+}
+
+// tokenize splits code into [{s,e,cls}] segments. cls ∈ '', 'str','com','num','kw'.
+function tokenize(code, cfg) {
+  const seg = [];
+  const n = code.length;
+  let i = 0, plainStart = 0;
+  const flushPlain = (end) => { if (end > plainStart) seg.push({ s: plainStart, e: end, cls: "" }); };
+  const isIdent = (c) => /[A-Za-z0-9_$]/.test(c);
+  while (i < n) {
+    const c = code[i];
+    // block comment
+    if (cfg.block && code.startsWith(cfg.block[0], i)) {
+      flushPlain(i);
+      let j = code.indexOf(cfg.block[1], i + cfg.block[0].length);
+      j = j < 0 ? n : j + cfg.block[1].length;
+      seg.push({ s: i, e: j, cls: "com" }); i = plainStart = j; continue;
+    }
+    // line comment
+    let lc = null;
+    for (const m of cfg.line) if (code.startsWith(m, i)) { lc = m; break; }
+    if (lc) { flushPlain(i); seg.push({ s: i, e: n, cls: "com" }); i = plainStart = n; break; }
+    // string
+    if (cfg.strings.includes(c)) {
+      flushPlain(i);
+      let j = i + 1;
+      while (j < n) { if (code[j] === "\\") { j += 2; continue; } if (code[j] === c) { j++; break; } j++; }
+      seg.push({ s: i, e: j, cls: "str" }); i = plainStart = j; continue;
+    }
+    // number
+    if (/[0-9]/.test(c) && (i === 0 || !isIdent(code[i - 1]))) {
+      flushPlain(i);
+      let j = i;
+      while (j < n && /[0-9a-fA-FxX._]/.test(code[j])) j++;
+      seg.push({ s: i, e: j, cls: "num" }); i = plainStart = j; continue;
+    }
+    // identifier / keyword
+    if (isIdent(c) && !/[0-9]/.test(c)) {
+      let j = i;
+      while (j < n && isIdent(code[j])) j++;
+      const word = code.slice(i, j);
+      if (cfg.kw.has(word)) { flushPlain(i); seg.push({ s: i, e: j, cls: "kw" }); plainStart = j; }
+      i = j; continue;
+    }
+    i++;
+  }
+  flushPlain(n);
+  return seg;
+}
+
+// renderCode returns highlighted, escaped HTML for one line of code. `mark`, if
+// given as [start,end), wraps that char range in a word-diff highlight.
+function renderCode(code, lang, mark) {
+  if (code === "") return "";
+  const cfg = lang || CSTYLE;
+  let segs;
+  try { segs = tokenize(code, cfg); } catch { segs = [{ s: 0, e: code.length, cls: "" }]; }
+  let html = "";
+  for (const sg of segs) {
+    let a = sg.s;
+    while (a < sg.e) {
+      let b = sg.e, marked = false;
+      if (mark && a < mark[1] && sg.e > mark[0]) {
+        if (a < mark[0]) { b = Math.min(sg.e, mark[0]); }
+        else { marked = true; b = Math.min(sg.e, mark[1]); }
+      }
+      const piece = esc(code.slice(a, b));
+      const cls = (sg.cls ? "t-" + sg.cls : "") + (marked ? (sg.cls ? " " : "") + "wd" : "");
+      html += cls ? `<span class="${cls}">${piece}</span>` : piece;
+      a = b;
+    }
+  }
+  return html;
 }
 
 async function toggleFile(f) {
@@ -891,16 +1155,18 @@ function buildCommitFiles() {
 function buildFilePatch(f) {
   if (!f.diff || !f.diff.preamble) return null;
   let body = "";
+  let finalLn = null; // last line emitted across hunks = the file's EOF line
   for (const h of f.diff.hunks) {
-    let oldc = 0, newc = 0, has = false;
+    let oldc = 0, newc = 0, has = false, last = null;
     const lines = [];
+    const push = (s, ln) => { lines.push(s); last = ln; };
     for (const ln of h.lines) {
-      if (ln.t === " ") { lines.push(" " + ln.c); oldc++; newc++; }
+      if (ln.t === " ") { push(" " + ln.c, ln); oldc++; newc++; }
       else if (ln.t === "+") {
-        if (ln.sel) { lines.push("+" + ln.c); newc++; has = true; }
+        if (ln.sel) { push("+" + ln.c, ln); newc++; has = true; }
       } else if (ln.t === "-") {
-        if (ln.sel) { lines.push("-" + ln.c); oldc++; has = true; }
-        else { lines.push(" " + ln.c); oldc++; newc++; }
+        if (ln.sel) { push("-" + ln.c, ln); oldc++; has = true; }
+        else { push(" " + ln.c, ln); oldc++; newc++; }
       }
     }
     if (!has) continue;
@@ -908,8 +1174,13 @@ function buildFilePatch(f) {
     const oldStart = m ? m[1] : "1";
     const newStart = m ? m[2] : "1";
     body += `@@ -${oldStart},${oldc} +${newStart},${newc} @@\n` + lines.join("\n") + "\n";
+    finalLn = last;
   }
   if (!body) return null;
+  // The "\ No newline at end of file" marker only applies to the file's final
+  // line, so emit it once after the last hunk's last line — never inline after a
+  // mid-hunk line (which would corrupt the patch when a deletion is deselected).
+  if (finalLn && finalLn.noNL) body += "\\ No newline at end of file\n";
   let pre = f.diff.preamble;
   if (!pre.endsWith("\n")) pre += "\n";
   return pre + body;
@@ -1029,12 +1300,7 @@ async function openShow(name, commit) {
       if (fd.binary) body.appendChild(el("div", "diff-msg", "Binary file."));
       else if (fd.tooLarge) body.appendChild(el("div", "diff-msg", "Diff too large to display."));
       else if (!fd.hunks || !fd.hunks.length) body.appendChild(el("div", "diff-msg", "No textual changes (mode, rename, or empty)."));
-      else for (const h of fd.hunks) {
-        const block = el("div", "hunk");
-        block.appendChild(el("div", "hunk-head", `<span class="hunk-header mono">${esc(h.header)}</span>`));
-        block.appendChild(diffLines(null, h, true));
-        body.appendChild(block);
-      }
+      else { const lang = langForPath(fd.path); for (const h of fd.hunks) body.appendChild(hunkView(null, h, true, lang)); }
       wrap.appendChild(body);
       card.appendChild(wrap);
     }
@@ -1210,9 +1476,15 @@ function init() {
   });
   $("#search").addEventListener("input", (e) => { QUERY = e.target.value.trim().toLowerCase(); render(); });
 
+  $("#settingsBtn").onclick = openSettings;
+  $("#paletteBtn").onclick = openPalette;
+
   document.addEventListener("click", closeAllMenus);
   document.addEventListener("keydown", (e) => {
-    if (document.querySelector(".dialog-modal")) return; // a styled dialog handles its own keys
+    if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+      e.preventDefault(); openPalette(); return;
+    }
+    if (document.querySelector(".dialog-modal") || document.querySelector(".palette")) return;
     if (e.key === "Escape") {
       if (!$("#showModal").hidden) closeShow();
       else if (!$("#cloneModal").hidden) closeClone();
@@ -1224,12 +1496,24 @@ function init() {
         document.activeElement.tagName !== "TEXTAREA") load();
   });
 
-  loadCollections();
-  load();
+  loadSettings().then(() => { applySettings(); restartAutoFetch(); }).finally(() => {
+    loadCollections();
+    load();
+  });
+  connectEvents();
+  checkForUpdate();
+
+  // Safety-net poll for raw working-tree edits (the SSE watcher covers all git
+  // operations instantly; this catches files edited in an external editor).
   setInterval(() => {
-    if (document.visibilityState === "visible" && !DRAWER && !REVIEW &&
-        $("#cloneModal").hidden && $("#showModal").hidden && !document.querySelector(".dialog-modal")) load();
-  }, 60000);
+    if (document.visibilityState === "visible" && !DRAWER && !REVIEW && !busyModalOpen()) load();
+  }, 15000);
+}
+
+function busyModalOpen() {
+  return !$("#cloneModal").hidden || !$("#showModal").hidden ||
+    document.querySelector(".dialog-modal") || document.querySelector(".palette") ||
+    document.querySelector(".sheet");
 }
 
 function bindMenu(btnSel, menuSel, onPick) {
@@ -1241,6 +1525,750 @@ function bindMenu(btnSel, menuSel, onPick) {
     menu.hidden = true;
     onPick(b);
   });
+}
+
+// =========================================================================
+// Settings · i18n · theming
+// =========================================================================
+let SETTINGS = {
+  theme: "dark", lang: "en", defaultPull: "ff", autoFetchMin: 0,
+  fontSize: 14, warnMainPush: true, discardToStash: true,
+};
+
+const I18N = {
+  fa: {
+    refresh: "تازه‌سازی", palette: "فرمان‌ها", sync: "همگام‌سازی", pull: "دریافت",
+    push: "ارسال", publish: "انتشار شاخه", commit: "ثبت", clone: "کلون", review: "مرور",
+    fetch: "واکشی", settings: "تنظیمات", history: "تاریخچه", search: "جستجو",
+    "Select all": "انتخاب همه", All: "همه", "Needs attention": "نیازمند توجه",
+    Behind: "عقب", Ahead: "جلو", Dirty: "تغییر‌یافته", "Filter by name…": "فیلتر بر اساس نام…",
+    Branch: "شاخه", Stash: "ذخیره موقت", Reveal: "نمایش در فایندر",
+  },
+};
+
+function t(key) {
+  const lang = SETTINGS.lang;
+  if (lang && lang !== "en" && I18N[lang] && I18N[lang][key]) return I18N[lang][key];
+  return key;
+}
+
+async function loadSettings() {
+  try {
+    const s = await api("GET", "/api/settings");
+    SETTINGS = Object.assign(SETTINGS, s);
+  } catch { /* defaults */ }
+}
+
+function applySettings() {
+  const root = document.documentElement;
+  root.setAttribute("data-theme", SETTINGS.theme || "dark");
+  root.style.fontSize = (SETTINGS.fontSize || 14) + "px";
+  root.lang = SETTINGS.lang || "en";
+  root.dir = SETTINGS.lang === "fa" ? "rtl" : "ltr";
+  applyI18n();
+}
+
+function applyI18n() {
+  document.querySelectorAll("[data-i18n]").forEach((e) => {
+    const k = e.getAttribute("data-i18n");
+    e.textContent = t(k);
+  });
+  const s = $("#search"); if (s) s.placeholder = t("Filter by name…");
+  if (REPOS.length || $("#repoList").children.length) render();
+}
+
+async function saveSettings() {
+  try {
+    const s = await api("POST", "/api/settings", SETTINGS);
+    SETTINGS = Object.assign(SETTINGS, s);
+  } catch (e) { toast("err", "Could not save settings", e.message); }
+}
+
+function openSettings() {
+  const s = sheet({ title: t("settings") });
+  const f = s.body;
+  const row = (label, control) => {
+    const r = el("div", "set-row");
+    r.appendChild(el("div", "set-label", label));
+    r.appendChild(control);
+    f.appendChild(r);
+  };
+  // theme
+  const theme = segmented(["dark", "light"], SETTINGS.theme, (v) => { SETTINGS.theme = v; applySettings(); saveSettings(); });
+  row("Theme", theme);
+  // language
+  const lang = segmented([["en", "English"], ["fa", "فارسی (RTL)"]], SETTINGS.lang, (v) => { SETTINGS.lang = v; applySettings(); saveSettings(); });
+  row("Language", lang);
+  // default pull
+  const pull = segmented([["ff", "Fast-forward"], ["rebase", "Rebase"], ["merge", "Merge"]], SETTINGS.defaultPull, (v) => { SETTINGS.defaultPull = v; saveSettings(); });
+  row("Default pull", pull);
+  // auto-fetch
+  const af = el("select", "set-select");
+  for (const [v, l] of [[0, "Off"], [5, "Every 5 min"], [10, "Every 10 min"], [30, "Every 30 min"]]) {
+    const o = el("option", null, l); o.value = v; if (SETTINGS.autoFetchMin === v) o.selected = true; af.appendChild(o);
+  }
+  af.onchange = () => { SETTINGS.autoFetchMin = parseInt(af.value, 10); saveSettings(); restartAutoFetch(); };
+  row("Background fetch", af);
+  // font size
+  const fs = el("input", "set-range"); fs.type = "range"; fs.min = 12; fs.max = 18; fs.value = SETTINGS.fontSize;
+  const fsv = el("span", "set-val", SETTINGS.fontSize + "px");
+  fs.oninput = () => { SETTINGS.fontSize = parseInt(fs.value, 10); fsv.textContent = SETTINGS.fontSize + "px"; applySettings(); };
+  fs.onchange = saveSettings;
+  const fsWrap = el("div", "set-inline"); fsWrap.appendChild(fs); fsWrap.appendChild(fsv);
+  row("Font size", fsWrap);
+  // toggles
+  row("Warn before pushing to main", toggle(SETTINGS.warnMainPush, (v) => { SETTINGS.warnMainPush = v; saveSettings(); }));
+  row("Discard moves changes to a stash (recoverable)", toggle(SETTINGS.discardToStash, (v) => { SETTINGS.discardToStash = v; saveSettings(); }));
+}
+
+function segmented(options, value, onPick) {
+  const wrap = el("div", "segmented");
+  for (const opt of options) {
+    const v = Array.isArray(opt) ? opt[0] : opt;
+    const label = Array.isArray(opt) ? opt[1] : opt;
+    const b = el("button", "seg" + (v === value ? " active" : ""), esc(label));
+    b.onclick = () => { wrap.querySelectorAll(".seg").forEach((x) => x.classList.remove("active")); b.classList.add("active"); onPick(v); };
+    wrap.appendChild(b);
+  }
+  return wrap;
+}
+
+function toggle(on, onChange) {
+  const t = el("button", "switch" + (on ? " on" : ""));
+  t.innerHTML = "<i></i>";
+  t.onclick = () => { on = !on; t.classList.toggle("on", on); onChange(on); };
+  return t;
+}
+
+// =========================================================================
+// Live updates (SSE) + auto-fetch + update check
+// =========================================================================
+let evtSource = null;
+let refreshDebounce = null;
+function connectEvents() {
+  try {
+    evtSource = new EventSource("/api/events");
+    evtSource.onmessage = (e) => { if (e.data === "refresh") scheduleLiveRefresh(); };
+    evtSource.onerror = () => { /* EventSource auto-reconnects */ };
+  } catch { /* SSE unsupported */ }
+}
+function scheduleLiveRefresh() {
+  clearTimeout(refreshDebounce);
+  refreshDebounce = setTimeout(() => {
+    if (busyModalOpen()) return;
+    if (DRAWER && !REVIEW) { reloadDrawer(); }
+    load();
+  }, 350);
+}
+
+let autoFetchTimer = null;
+function restartAutoFetch() {
+  clearInterval(autoFetchTimer);
+  if (SETTINGS.autoFetchMin > 0) {
+    autoFetchTimer = setInterval(() => {
+      if (document.visibilityState === "visible") batch("fetch", {}, true);
+    }, SETTINGS.autoFetchMin * 60000);
+  }
+}
+
+async function checkForUpdate() {
+  try {
+    const u = await api("GET", "/api/update-check");
+    if (u.hasUpdate) {
+      const t = toast("run", "Update available", `ChitHub ${u.latest} is out (you have ${u.current}).`);
+      t.className = "toast ok";
+      const pre = t.querySelector("pre") || t.appendChild(el("pre"));
+      pre.textContent = "Click to open the release page.";
+      t.style.cursor = "pointer";
+      t.onclick = () => window.open(u.url, "_blank");
+    }
+  } catch { /* offline — ignore */ }
+}
+
+// =========================================================================
+// Per-repo: sync · publish · open · push-to-main guard
+// =========================================================================
+function doSync(name) {
+  return runOp(name, `sync ${name}`, () => api("POST", `/api/repo/${enc(name)}/sync`, { mode: SETTINGS.defaultPull }));
+}
+function doPublish(name) {
+  return runOp(name, `publish ${name}`, () => api("POST", `/api/repo/${enc(name)}/publish`, {}));
+}
+async function doOpen(name, target) {
+  try {
+    const res = await api("POST", `/api/repo/${enc(name)}/open`, { target });
+    if (!res.ok) toast("err", "Open failed", res.output);
+  } catch (e) { toast("err", "Open failed", e.message); }
+}
+
+// =========================================================================
+// Branch management
+// =========================================================================
+function branchMenuItems(d) {
+  const cur = d.branches.current;
+  return [
+    { label: "Publish branch", fn: () => doPublish(d.name) },
+    { label: "Rename branch…", fn: () => renameBranchUI(d.name, cur) },
+    { label: "Delete a branch…", fn: () => deleteBranchUI(d) },
+    { label: "—", sep: true },
+    { label: "Merge a branch into " + cur + "…", fn: () => mergeUI(d) },
+    { label: "Rebase " + cur + " onto…", fn: () => rebaseUI(d) },
+    { label: "—", sep: true },
+    { label: "Tags…", fn: () => openTags(d.name) },
+  ];
+}
+async function renameBranchUI(name, cur) {
+  const to = await promptDialog("Rename branch", { label: "New name for “" + cur + "”", value: cur, okLabel: "Rename" });
+  if (!to || to === cur) return;
+  await runOp(name, `rename → ${to}`, () => api("POST", `/api/repo/${enc(name)}/branch-rename`, { from: cur, to }));
+  if (DRAWER && DRAWER.name === name) reloadDrawer();
+}
+async function deleteBranchUI(d) {
+  const others = (d.branches.local || []).filter((b) => b !== d.branches.current);
+  if (!others.length) { toast("err", "No other branches", "There are no other local branches to delete."); return; }
+  const branch = await pickDialog("Delete a branch", "Choose a local branch to delete:", others);
+  if (!branch) return;
+  const remote = await confirmDialog("Delete branch", `Also delete the remote branch origin/${branch}?`, { okLabel: "Local + remote", cancelLabel: "Local only" });
+  await runOp(d.name, `delete ${branch}`, async () => {
+    const r1 = await api("POST", `/api/repo/${enc(d.name)}/branch-delete`, { branch, force: true });
+    if (remote) await api("POST", `/api/repo/${enc(d.name)}/branch-delete`, { branch, remote: true }).catch(() => {});
+    return r1;
+  });
+  if (DRAWER && DRAWER.name === d.name) reloadDrawer();
+}
+async function mergeUI(d) {
+  const others = (d.branches.local || []).concat(d.branches.remote || []).filter((b) => b !== d.branches.current);
+  const branch = await pickDialog("Merge branch", `Merge which branch into ${d.branches.current}?`, others);
+  if (!branch) return;
+  await runOp(d.name, `merge ${branch}`, () => api("POST", `/api/repo/${enc(d.name)}/merge`, { branch }));
+  if (DRAWER && DRAWER.name === d.name) reloadDrawer();
+}
+async function rebaseUI(d) {
+  const others = (d.branches.local || []).concat(d.branches.remote || []).filter((b) => b !== d.branches.current);
+  const branch = await pickDialog("Rebase", `Rebase ${d.branches.current} onto which branch?`, others);
+  if (!branch) return;
+  await runOp(d.name, `rebase onto ${branch}`, () => api("POST", `/api/repo/${enc(d.name)}/rebase`, { branch }));
+  if (DRAWER && DRAWER.name === d.name) reloadDrawer();
+}
+
+// =========================================================================
+// Tags
+// =========================================================================
+async function openTags(name) {
+  const s = sheet({ title: "Tags — " + name });
+  const add = el("button", "btn small primary", "＋ New tag");
+  s.head.insertBefore(add, s.head.querySelector(".close"));
+  const list = el("div", "tag-list");
+  s.body.appendChild(list);
+  async function refresh() {
+    list.innerHTML = "Loading…";
+    const data = await api("GET", `/api/repo/${enc(name)}/tags`);
+    list.innerHTML = "";
+    const tags = data.tags || [];
+    if (!tags.length) list.appendChild(el("div", "sub", "No tags yet."));
+    for (const tg of tags) {
+      const it = el("div", "tag-item");
+      it.appendChild(el("div", "tag-name mono", esc(tg.name)));
+      it.appendChild(el("div", "tag-subj", esc(tg.subject || tg.short)));
+      const del = el("button", "icbtn danger", "🗑");
+      del.title = "Delete tag";
+      del.onclick = async () => {
+        if (!(await confirmDialog("Delete tag", `Delete tag ${tg.name}?`, { okLabel: "Delete", danger: true }))) return;
+        const push = await confirmDialog("Delete tag", "Also delete it on origin?", { okLabel: "Local + remote", cancelLabel: "Local only" });
+        await api("POST", `/api/repo/${enc(name)}/tag`, { action: "delete", name: tg.name, push });
+        refresh();
+      };
+      it.appendChild(del);
+      list.appendChild(it);
+    }
+  }
+  add.onclick = async () => {
+    const tag = await promptDialog("New tag", { label: "Tag name", placeholder: "v1.0.0", okLabel: "Next" });
+    if (!tag) return;
+    const msg = await promptDialog("New tag", { label: "Message (optional, for an annotated tag)", placeholder: "Release 1.0.0", okLabel: "Create" });
+    const push = await confirmDialog("New tag", "Push the tag to origin?", { okLabel: "Create + push", cancelLabel: "Create locally" });
+    const res = await api("POST", `/api/repo/${enc(name)}/tag`, { action: "create", name: tag, message: msg || "", push });
+    if (!res.ok) toast("err", "Tag failed", res.output); else refresh();
+  };
+  refresh();
+}
+
+// =========================================================================
+// History view + graph
+// =========================================================================
+async function openHistory(name) {
+  const s = sheet({ title: "History — " + name, wide: true });
+  const search = el("input", "sheet-search");
+  search.type = "search"; search.placeholder = "Search messages…";
+  s.head.insertBefore(search, s.head.querySelector(".close"));
+  const list = el("div", "history-list");
+  s.body.appendChild(list);
+  const state = { skip: 0, q: "", done: false, loading: false, all: [] };
+  async function loadMore(reset) {
+    if (state.loading || (state.done && !reset)) return;
+    state.loading = true;
+    if (reset) { state.skip = 0; state.done = false; state.all = []; list.innerHTML = ""; }
+    try {
+      const data = await api("GET", `/api/repo/${enc(name)}/history?skip=${state.skip}&limit=80&q=${enc(state.q)}`);
+      const commits = data.commits || [];
+      if (commits.length < 80) state.done = true;
+      state.skip += commits.length;
+      state.all.push(...commits);
+      list.innerHTML = "";
+      renderHistory(name, list, state.all);
+    } catch (e) { list.innerHTML = ""; list.appendChild(el("div", "sub", "Error: " + esc(e.message))); }
+    state.loading = false;
+  }
+  search.oninput = debounce(() => { state.q = search.value.trim(); loadMore(true); }, 250);
+  s.body.onscroll = () => {
+    if (!state.done && !state.loading && s.body.scrollTop + s.body.clientHeight > s.body.scrollHeight - 240) loadMore(false);
+  };
+  loadMore(true);
+}
+
+const LANE_COLORS = ["#2f81f7", "#3fb950", "#a371f7", "#db8c3a", "#f85149", "#d29922", "#39c5cf", "#ec6cb9"];
+function renderHistory(name, list, commits) {
+  const rows = computeGraph(commits);
+  const laneW = 14;
+  for (const r of rows) {
+    const c = r.commit;
+    const it = el("div", "hrow");
+    it.appendChild(graphCell(r, laneW));
+    const body = el("div", "hbody");
+    const top = el("div", "htop");
+    top.appendChild(el("span", "hsubj", esc(c.subject)));
+    for (const ref of (c.refs || [])) {
+      const isTag = ref.startsWith("tag: ");
+      body && top.appendChild(el("span", "ref" + (isTag ? " tag" : ""), esc(isTag ? ref.slice(5) : ref)));
+    }
+    body.appendChild(top);
+    body.appendChild(el("div", "hmeta", `${esc(c.short)} · ${esc(c.author)} · ${relTime(c.time)}` + ((c.parents || []).length > 1 ? " · merge" : "")));
+    it.appendChild(body);
+    const more = el("button", "btn small ghost more", "⋯");
+    it.appendChild(attachMenu(more, [
+      { label: "View changes", fn: () => openShow(name, c) },
+      { label: "Copy hash", fn: () => navigator.clipboard && navigator.clipboard.writeText(c.hash) },
+      { label: "—", sep: true },
+      { label: "Revert this commit", fn: () => commitAction(name, "revert", c) },
+      { label: "Cherry-pick onto current", fn: () => commitAction(name, "cherry-pick", c) },
+      { label: "—", sep: true },
+      { label: "Reset (soft) to here", fn: () => resetUI(name, c, "soft") },
+      { label: "Reset (mixed) to here", fn: () => resetUI(name, c, "mixed") },
+      { label: "Reset (hard) to here…", fn: () => resetUI(name, c, "hard"), danger: true },
+      { label: "—", sep: true },
+      { label: "Tag this commit…", fn: () => tagCommit(name, c) },
+    ]));
+    it.onclick = (e) => { if (!e.target.closest(".split")) openShow(name, c); };
+    list.appendChild(it);
+  }
+}
+
+// computeGraph assigns each commit a lane and records the lanes passing through
+// before/after, so we can draw a railroad-style graph.
+function computeGraph(commits) {
+  const lanes = []; // lane -> hash it's waiting for
+  const rows = [];
+  for (const c of commits) {
+    let lane = lanes.indexOf(c.hash);
+    if (lane === -1) {
+      lane = lanes.indexOf(null);
+      if (lane === -1) { lane = lanes.length; lanes.push(null); }
+      lanes[lane] = c.hash;
+    }
+    const before = lanes.slice();
+    const parents = c.parents || [];
+    // clear any other lanes also waiting for this hash (they merge in here)
+    for (let i = 0; i < lanes.length; i++) if (i !== lane && lanes[i] === c.hash) lanes[i] = null;
+    if (parents.length === 0) {
+      lanes[lane] = null;
+    } else {
+      lanes[lane] = parents[0];
+      for (let k = 1; k < parents.length; k++) {
+        let pl = lanes.indexOf(parents[k]);
+        if (pl === -1) { pl = lanes.indexOf(null); if (pl === -1) { pl = lanes.length; lanes.push(null); } lanes[pl] = parents[k]; }
+      }
+    }
+    rows.push({ commit: c, lane, before, after: lanes.slice() });
+  }
+  return rows;
+}
+
+function graphCell(r, laneW) {
+  const width = Math.max(r.before.length, r.after.length, r.lane + 1) * laneW + laneW;
+  const h = 46, mid = h / 2;
+  const color = (i) => LANE_COLORS[i % LANE_COLORS.length];
+  const x = (i) => i * laneW + laneW / 2;
+  let svg = `<svg width="${width}" height="${h}" class="graph">`;
+  // top half: lanes coming in
+  for (let i = 0; i < r.before.length; i++) {
+    if (!r.before[i]) continue;
+    const target = r.before[i] === r.commit.hash ? r.lane : i;
+    svg += `<path d="M${x(i)} 0 L${x(target)} ${mid}" stroke="${color(target)}" />`;
+  }
+  // bottom half: lanes going out
+  for (let i = 0; i < r.after.length; i++) {
+    if (!r.after[i]) continue;
+    let from = r.lane;
+    if (r.before[i] && r.before[i] !== r.commit.hash && r.after[i] === r.before[i]) from = i;
+    svg += `<path d="M${x(from)} ${mid} L${x(i)} ${h}" stroke="${color(i)}" />`;
+  }
+  const merge = (r.commit.parents || []).length > 1;
+  svg += `<circle cx="${x(r.lane)}" cy="${mid}" r="${merge ? 5 : 4}" fill="${color(r.lane)}" stroke="var(--diff-bg)" stroke-width="1.5"/>`;
+  svg += `</svg>`;
+  const cell = el("div", "graph-cell");
+  cell.innerHTML = svg;
+  return cell;
+}
+
+async function commitAction(name, action, c) {
+  const verb = action === "revert" ? "Revert" : "Cherry-pick";
+  if (!(await confirmDialog(verb, `${verb} ${c.short} — “${c.subject}”?`, { okLabel: verb }))) return;
+  await runOp(name, `${action} ${c.short}`, () => api("POST", `/api/repo/${enc(name)}/${action}`, { hash: c.hash }));
+}
+async function resetUI(name, c, mode) {
+  const danger = mode === "hard";
+  if (!(await confirmDialog(`Reset (${mode})`,
+    `Move ${name}'s branch to ${c.short}` + (danger ? " and DISCARD all changes after it?\nThis can't be undone." : `?\nChanges after it are kept ${mode === "soft" ? "staged" : "in your working tree"}.`),
+    { okLabel: "Reset " + mode, danger }))) return;
+  await runOp(name, `reset ${mode} ${c.short}`, () => api("POST", `/api/repo/${enc(name)}/reset`, { hash: c.hash, mode }));
+}
+async function tagCommit(name, c) {
+  const tag = await promptDialog("Tag commit", { label: `Tag name for ${c.short}`, placeholder: "v1.0.0", okLabel: "Next" });
+  if (!tag) return;
+  const push = await confirmDialog("Tag commit", "Push the tag to origin?", { okLabel: "Create + push", cancelLabel: "Create locally" });
+  const res = await api("POST", `/api/repo/${enc(name)}/tag`, { action: "create", name: tag, ref: c.hash, push });
+  if (!res.ok) toast("err", "Tag failed", res.output); else toast("ok", "Tag created", `${tag} → ${c.short}`);
+}
+
+// =========================================================================
+// Conflict resolution
+// =========================================================================
+async function openConflicts(name) {
+  const cs = await api("GET", `/api/repo/${enc(name)}/conflicts`);
+  if (!cs.files || !cs.files.length) { toast("ok", "No conflicts", "Nothing to resolve."); if (DRAWER) reloadDrawer(); return; }
+  const s = sheet({ title: `Resolve conflicts — ${name}`, wide: true });
+  const op = cs.inProgress || "merge";
+  const banner = el("div", "conflict-banner");
+  banner.textContent = `A ${op} is in progress with ${cs.files.length} conflicted file(s).`;
+  s.body.appendChild(banner);
+  const list = el("div", "conflict-files");
+  s.body.appendChild(list);
+  for (const path of cs.files) {
+    const it = el("div", "cf-row");
+    it.appendChild(el("span", "fpath mono", esc(path)));
+    const tools = el("span", "cf-tools");
+    tools.appendChild(smallBtn("Use ours", () => resolve(path, "ours")));
+    tools.appendChild(smallBtn("Use theirs", () => resolve(path, "theirs")));
+    tools.appendChild(smallBtn("Edit…", () => editConflict(name, path, refresh)));
+    tools.appendChild(smallBtn("Mark resolved", () => resolve(path, "mark")));
+    it.appendChild(tools);
+    list.appendChild(it);
+  }
+  const actions = el("div", "conflict-actions");
+  actions.appendChild(actBtn("Continue " + op, "primary", () => seq("continue")));
+  actions.appendChild(actBtn("Abort " + op, "danger", () => seq("abort")));
+  if (op === "rebase" || op === "cherry-pick") actions.appendChild(actBtn("Skip", "ghost", () => seq("skip")));
+  s.body.appendChild(actions);
+
+  async function resolve(path, side) {
+    await api("POST", `/api/repo/${enc(name)}/resolve`, { path, side });
+    refresh();
+  }
+  async function seq(action) {
+    const res = await api("POST", `/api/repo/${enc(name)}/sequencer`, { op, action });
+    toast(res.ok ? "ok" : "err", `${op} ${action}`, res.output || "done");
+    s.close(); if (DRAWER) reloadDrawer(); load();
+  }
+  function refresh() { s.close(); openConflicts(name); }
+}
+
+async function editConflict(name, path, after) {
+  const cf = await api("GET", `/api/repo/${enc(name)}/conflict?path=${enc(path)}`);
+  const s = sheet({ title: "Edit — " + path, wide: true });
+  const ta = el("textarea", "conflict-edit");
+  ta.value = cf.merged || "";
+  s.body.appendChild(el("div", "sub", "Remove the <<<<<<< ======= >>>>>>> markers, keep what you want, then save."));
+  s.body.appendChild(ta);
+  const save = actBtn("Save & mark resolved", "primary", async () => {
+    await api("POST", `/api/repo/${enc(name)}/resolve`, { path, side: "content", content: ta.value });
+    s.close(); after && after();
+  });
+  const bar = el("div", "conflict-actions"); bar.appendChild(save);
+  s.body.appendChild(bar);
+}
+
+// =========================================================================
+// Multi-repo bulk operations
+// =========================================================================
+function renderBulkBar() {
+  let bar = $("#bulkBar");
+  const n = SELECTED.size;
+  if (!n) { if (bar) bar.remove(); return; }
+  if (!bar) {
+    bar = el("div", "bulk-bar"); bar.id = "bulkBar";
+    document.body.appendChild(bar);
+  }
+  bar.innerHTML = "";
+  bar.appendChild(el("span", "bulk-count", `${n} selected`));
+  const acts = el("div", "bulk-acts");
+  acts.appendChild(actBtn("Sync", "ghost", () => bulkOp("sync")));
+  acts.appendChild(actBtn("Commit…", "primary", bulkCommitUI));
+  acts.appendChild(actBtn("Switch branch…", "ghost", bulkCheckoutUI));
+  acts.appendChild(actBtn("Run…", "ghost", runCommandUI));
+  acts.appendChild(actBtn("Clear", "ghost", () => { SELECTED.clear(); render(); }));
+  bar.appendChild(acts);
+}
+async function bulkOp(action) {
+  if (action === "sync") {
+    const repos = [...SELECTED];
+    const tt = toast("run", `sync → ${repos.length} repos`, "running…");
+    repos.forEach((n) => setBusy(n, true));
+    const results = await Promise.all(repos.map((n) => api("POST", `/api/repo/${enc(n)}/sync`, { mode: SETTINGS.defaultPull }).catch((e) => ({ ok: false, repo: n, output: e.message }))));
+    repos.forEach((n) => setBusy(n, false));
+    const ok = results.filter((r) => r.ok).length;
+    finishToast(tt, { ok: ok === results.length, output: `${ok}/${results.length} synced` });
+    load();
+  }
+}
+async function bulkCommitUI() {
+  const repos = [...SELECTED];
+  const dirty = REPOS.filter((r) => repos.includes(r.name) && r.dirty).map((r) => r.name);
+  if (!dirty.length) { toast("err", "Nothing to commit", "None of the selected repos have changes."); return; }
+  const msg = await promptDialog("Commit across repos", {
+    message: `Stage all changes and commit in ${dirty.length} repo(s) with one message:`,
+    label: "Commit message", placeholder: "Apply the same change everywhere", okLabel: "Commit",
+  });
+  if (!msg) return;
+  const push = await confirmDialog("Commit across repos", "Push after committing?", { okLabel: "Commit + push", cancelLabel: "Commit only" });
+  const tt = toast("run", `commit → ${dirty.length} repos`, "running…");
+  dirty.forEach((n) => setBusy(n, true));
+  try {
+    const data = await api("POST", "/api/bulk/commit", { repos: dirty, message: msg, push });
+    const ok = (data.results || []).filter((r) => r.ok).length;
+    finishToast(tt, { ok: ok === data.results.length, output: bulkOutput(data.results) });
+  } catch (e) { finishToast(tt, { ok: false, output: e.message }); }
+  finally { dirty.forEach((n) => setBusy(n, false)); load(); }
+}
+async function bulkCheckoutUI() {
+  const repos = [...SELECTED];
+  const branch = await promptDialog("Switch branch across repos", {
+    message: `Checkout the same branch in ${repos.length} repo(s).`,
+    label: "Branch name", placeholder: "main", okLabel: "Switch",
+  });
+  if (!branch) return;
+  const create = await confirmDialog("Switch branch", `If “${branch}” doesn't exist in a repo, create it there?`, { okLabel: "Create if missing", cancelLabel: "Only if it exists" });
+  const tt = toast("run", `checkout ${branch} → ${repos.length} repos`, "running…");
+  repos.forEach((n) => setBusy(n, true));
+  try {
+    const data = await api("POST", "/api/bulk/checkout", { repos, branch, create });
+    const ok = (data.results || []).filter((r) => r.ok).length;
+    finishToast(tt, { ok: ok === data.results.length, output: bulkOutput(data.results) });
+  } catch (e) { finishToast(tt, { ok: false, output: e.message }); }
+  finally { repos.forEach((n) => setBusy(n, false)); load(); }
+}
+async function runCommandUI() {
+  const repos = SELECTED.size ? [...SELECTED] : REPOS.filter(passesFilter).map((r) => r.name);
+  const cmd = await promptDialog("Run a command", {
+    message: `Run a shell command in ${repos.length} repo(s). Each runs in its own folder.`,
+    label: "Command", placeholder: "git status -s", okLabel: "Run",
+  });
+  if (!cmd) return;
+  const s = sheet({ title: `Run: ${cmd}`, wide: true });
+  s.body.appendChild(el("div", "sub", `Running in ${repos.length} repos…`));
+  const grid = el("div", "run-grid"); s.body.appendChild(grid);
+  try {
+    const data = await api("POST", "/api/run", { repos, cmd });
+    grid.innerHTML = "";
+    for (const r of (data.results || [])) {
+      const card = el("div", "run-card" + (r.ok ? "" : " fail"));
+      card.appendChild(el("div", "run-repo", esc(r.repo) + (r.ok ? " ✓" : " ✗")));
+      const pre = el("pre"); pre.textContent = r.output || "(no output)"; card.appendChild(pre);
+      grid.appendChild(card);
+    }
+  } catch (e) { grid.innerHTML = ""; grid.appendChild(el("div", "sub", "Error: " + esc(e.message))); }
+}
+function bulkOutput(results) {
+  return (results || []).map((r) => `${r.ok ? "✓" : "✗"} ${r.repo}: ${firstLine(r.output)}`).join("\n");
+}
+
+// Cross-repo search
+async function openSearch(initial) {
+  const s = sheet({ title: "Search across repos", wide: true });
+  const input = el("input", "sheet-search big");
+  input.type = "search"; input.placeholder = "Search code in every repo…"; input.value = initial || "";
+  s.head.insertBefore(input, s.head.querySelector(".close"));
+  const results = el("div", "search-results"); s.body.appendChild(results);
+  const run = debounce(async () => {
+    const q = input.value.trim();
+    if (q.length < 2) { results.innerHTML = ""; return; }
+    results.innerHTML = "<div class='sub'>Searching…</div>";
+    try {
+      const data = await api("GET", "/api/search?q=" + enc(q));
+      const hits = data.hits || [];
+      results.innerHTML = "";
+      if (!hits.length) { results.appendChild(el("div", "sub", "No matches.")); return; }
+      const byRepo = {};
+      for (const h of hits) (byRepo[h.repo] = byRepo[h.repo] || []).push(h);
+      results.appendChild(el("div", "sub", `${hits.length} matches in ${Object.keys(byRepo).length} repos`));
+      for (const repo of Object.keys(byRepo).sort()) {
+        results.appendChild(el("div", "search-repo", esc(repo)));
+        for (const h of byRepo[repo].slice(0, 50)) {
+          const it = el("div", "search-hit");
+          it.innerHTML = `<span class="sh-loc mono">${esc(h.path)}:${h.line}</span><span class="sh-text mono">${esc(h.text.slice(0, 200))}</span>`;
+          it.onclick = () => doOpen(repo, "editor");
+          it.appendChild(el("span", ""));
+          results.appendChild(it);
+        }
+      }
+    } catch (e) { results.innerHTML = ""; results.appendChild(el("div", "sub", "Error: " + esc(e.message))); }
+  }, 280);
+  input.oninput = run;
+  setTimeout(() => input.focus(), 30);
+  if (initial) run();
+}
+
+// Workspace snapshots
+async function snapshotSave() {
+  const data = await api("GET", "/api/snapshot");
+  const entries = data.entries || [];
+  const json = JSON.stringify(entries);
+  localStorage.setItem("chithub:snapshot", json);
+  toast("ok", "Snapshot saved", `Recorded the branch of ${entries.length} repos. Restore it anytime.`);
+}
+async function snapshotRestore() {
+  const json = localStorage.getItem("chithub:snapshot");
+  if (!json) { toast("err", "No snapshot", "Save a snapshot first."); return; }
+  let entries; try { entries = JSON.parse(json); } catch { toast("err", "Bad snapshot", "Could not read it."); return; }
+  if (!(await confirmDialog("Restore snapshot", `Switch ${entries.length} repos back to their saved branches?`, { okLabel: "Restore" }))) return;
+  const tt = toast("run", "restore snapshot", "switching branches…");
+  try {
+    const res = await api("POST", "/api/snapshot/restore", { entries });
+    const ok = (res.results || []).filter((r) => r.ok).length;
+    finishToast(tt, { ok: ok === res.results.length, output: bulkOutput(res.results) });
+  } catch (e) { finishToast(tt, { ok: false, output: e.message }); }
+  load();
+}
+
+// =========================================================================
+// Command palette
+// =========================================================================
+function paletteCommands() {
+  const cmds = [
+    { name: "Refresh", run: load },
+    { name: "Clone repository…", run: openClone },
+    { name: "Settings…", run: openSettings },
+    { name: "Toggle theme (dark/light)", run: () => { SETTINGS.theme = SETTINGS.theme === "dark" ? "light" : "dark"; applySettings(); saveSettings(); } },
+    { name: "Search across repos…", run: () => openSearch("") },
+    { name: "Run command in repos…", run: runCommandUI },
+    { name: "Save workspace snapshot", run: snapshotSave },
+    { name: "Restore workspace snapshot", run: snapshotRestore },
+    { name: "Review commits & pushes", run: () => startReview("commit") },
+    { name: "Review pulls", run: () => startReview("pull") },
+    { name: "Fetch all", run: () => batch("fetch", {}) },
+    { name: "Pull all", run: () => batch("pull", { mode: SETTINGS.defaultPull }) },
+    { name: "Push all", run: () => batch("push", { force: false }) },
+  ];
+  for (const r of REPOS) {
+    cmds.push({ name: "Open " + r.name, hint: "repo", run: () => openDrawer(r.name, { commit: true }) });
+    cmds.push({ name: "History " + r.name, hint: "repo", run: () => openHistory(r.name) });
+  }
+  return cmds;
+}
+function openPalette() {
+  if (document.querySelector(".palette")) return;
+  closeAllMenus();
+  const cmds = paletteCommands();
+  const modal = el("div", "palette");
+  const backdrop = el("div", "modal-backdrop");
+  const card = el("div", "palette-card");
+  const input = el("input", "palette-input");
+  input.type = "text"; input.placeholder = "Type a command or repo…  (↑↓ to move, Enter to run)";
+  const listEl = el("div", "palette-list");
+  card.appendChild(input); card.appendChild(listEl);
+  modal.appendChild(backdrop); modal.appendChild(card);
+  document.body.appendChild(modal);
+  let filtered = cmds, sel = 0;
+  const close = () => { modal.remove(); document.removeEventListener("keydown", onKey, true); };
+  function fuzzy(q, s) {
+    q = q.toLowerCase(); s = s.toLowerCase();
+    if (!q) return true;
+    let i = 0; for (const ch of s) { if (ch === q[i]) i++; if (i === q.length) return true; }
+    return s.includes(q);
+  }
+  function renderList() {
+    listEl.innerHTML = "";
+    filtered.slice(0, 60).forEach((c, i) => {
+      const it = el("div", "palette-item" + (i === sel ? " sel" : ""));
+      it.appendChild(el("span", "pi-name", esc(c.name)));
+      if (c.hint) it.appendChild(el("span", "pi-hint", esc(c.hint)));
+      it.onmouseenter = () => { sel = i; markSel(); };
+      it.onclick = () => { close(); c.run(); };
+      listEl.appendChild(it);
+    });
+  }
+  function markSel() {
+    [...listEl.children].forEach((c, i) => c.classList.toggle("sel", i === sel));
+    const cur = listEl.children[sel]; if (cur) cur.scrollIntoView({ block: "nearest" });
+  }
+  input.oninput = () => { const q = input.value.trim(); filtered = cmds.filter((c) => fuzzy(q, c.name)); sel = 0; renderList(); };
+  const onKey = (e) => {
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(sel + 1, Math.min(filtered.length, 60) - 1); markSel(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(sel - 1, 0); markSel(); }
+    else if (e.key === "Enter") { e.preventDefault(); const c = filtered[sel]; if (c) { close(); c.run(); } }
+  };
+  document.addEventListener("keydown", onKey, true);
+  backdrop.onclick = close;
+  renderList();
+  setTimeout(() => input.focus(), 20);
+}
+
+// =========================================================================
+// Reusable full-screen sheet + small helpers
+// =========================================================================
+function sheet(opts) {
+  opts = opts || {};
+  const modal = el("div", "modal sheet-modal");
+  const backdrop = el("div", "modal-backdrop");
+  const card = el("div", "modal-card sheet" + (opts.wide ? " sheet-wide" : ""));
+  const head = el("div", "sheet-head");
+  head.appendChild(el("h3", null, esc(opts.title || "")));
+  const close = el("button", "close", "×");
+  const finish = () => { modal.remove(); document.removeEventListener("keydown", onKey, true); opts.onClose && opts.onClose(); };
+  close.onclick = finish;
+  head.appendChild(close);
+  card.appendChild(head);
+  const body = el("div", "sheet-body");
+  card.appendChild(body);
+  backdrop.onclick = finish;
+  const onKey = (e) => { if (e.key === "Escape" && !document.querySelector(".dialog-modal")) { e.preventDefault(); e.stopPropagation(); finish(); } };
+  document.addEventListener("keydown", onKey, true);
+  modal.appendChild(backdrop); modal.appendChild(card);
+  document.body.appendChild(modal);
+  return { modal, body, head, close: finish };
+}
+
+const smallBtn = (label, fn) => { const b = el("button", "btn small ghost", esc(label)); b.onclick = fn; return b; };
+
+// pickDialog: choose one value from a list via a styled dialog.
+function pickDialog(title, message, options) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const s = sheet({ title, onClose: () => { if (!settled) { settled = true; resolve(null); } } });
+    if (message) s.body.appendChild(el("div", "sub", message));
+    const list = el("div", "pick-list");
+    for (const opt of options) {
+      const b = el("button", "pick-item mono", esc(opt));
+      b.onclick = () => { settled = true; resolve(opt); s.close(); };
+      list.appendChild(b);
+    }
+    s.body.appendChild(list);
+  });
+}
+
+function debounce(fn, ms) {
+  let h = null;
+  return (...a) => { clearTimeout(h); h = setTimeout(() => fn(...a), ms); };
 }
 
 init();
