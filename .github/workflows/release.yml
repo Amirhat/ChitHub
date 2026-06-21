@@ -1,0 +1,47 @@
+name: release
+
+# Tag a version to cut a release:  git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # macOS runner so we can also build the .app / .dmg. Pure-Go cross-compiles
+    # the Linux + Intel/ARM macOS binaries in the same job.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: GoReleaser (binaries, archives, Homebrew tap)
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT with write access to <owner>/homebrew-tap (for `brew install`).
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Build macOS .app and .dmg
+        run: |
+          chmod +x packaging/make-dmg.sh
+          ./packaging/make-dmg.sh "${{ github.ref_name }}"
+
+      - name: Attach .dmg to the release
+        run: gh release upload "${{ github.ref_name }}" dist/ChitHub-*.dmg --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

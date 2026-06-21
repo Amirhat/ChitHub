@@ -1,0 +1,62 @@
+# GoReleaser config for ChitHub — https://goreleaser.com
+# Triggered by the GitHub Actions workflow on a pushed tag (e.g. v0.1.0).
+version: 2
+
+project_name: chithub
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: chithub
+    main: .
+    binary: chithub
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+# A single macOS universal binary (amd64 + arm64) used for the .app/.dmg too.
+universal_binaries:
+  - id: chithub
+    replace: false
+
+archives:
+  - id: chithub
+    ids: [chithub]
+    name_template: "chithub_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+# Homebrew tap: publishes a formula to github.com/<owner>/homebrew-tap so users
+# can `brew install <owner>/tap/chithub`. Requires a HOMEBREW_TAP_TOKEN secret
+# (a PAT with write access to that tap repo).
+brews:
+  - name: chithub
+    repository:
+      owner: "{{ .Env.GITHUB_REPOSITORY_OWNER }}"
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/{{ .Env.GITHUB_REPOSITORY }}"
+    description: "Manage every git repo in a folder — commit, push, pull and review in one place."
+    license: "MIT"
+    install: |
+      bin.install "chithub"
+    test: |
+      system "#{bin}/chithub", "-version"
+
+release:
+  draft: false
+  prerelease: auto
+  name_template: "ChitHub {{ .Version }}"

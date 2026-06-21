@@ -1,0 +1,8 @@
+# build output
+/chithub
+/dist/
+*.dmg
+*.app
+
+# local
+.DS_Store

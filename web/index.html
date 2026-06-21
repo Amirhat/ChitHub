@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChitHub</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐙</text></svg>" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🐙</span>
+      <div class="brand-text">
+        <h1>ChitHub</h1>
+        <div class="split collection">
+          <button id="collectionBtn" class="collection-btn" title="Active collection — click to switch folders">
+            <span class="folder-ic">🗂️</span>
+            <span id="collectionName">…</span>
+            <span class="caret-dim">▾</span>
+          </button>
+          <div class="menu collection-menu" id="collectionMenu" hidden></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="global-actions">
+      <div class="split">
+        <button id="reviewBtn" class="btn accent" title="Step through repos that need a commit or push">▶ Review</button>
+        <button id="reviewMenuBtn" class="btn accent caret" title="Review options">▾</button>
+        <div class="menu" id="reviewMenu" hidden>
+          <button data-mode="commit">Review commits &amp; pushes</button>
+          <button data-mode="pull">Review pulls (one by one)</button>
+        </div>
+      </div>
+      <button id="cloneBtn" class="btn ghost" title="Clone a repository into this folder">
+        <span class="ic">＋</span> Clone
+      </button>
+      <button id="refreshBtn" class="btn ghost" title="Rescan all repositories (R)">
+        <span class="ic">⟳</span> Refresh
+      </button>
+      <button id="fetchAllBtn" class="btn" title="Fetch selected repos">Fetch</button>
+      <div class="split">
+        <button id="pullAllBtn" class="btn primary">Pull</button>
+        <button id="pullAllMenuBtn" class="btn primary caret" title="Pull options">▾</button>
+        <div class="menu" id="pullAllMenu" hidden>
+          <button data-mode="ff">Pull (fast-forward only)</button>
+          <button data-mode="rebase">Pull --rebase</button>
+          <button data-mode="merge">Pull (merge)</button>
+        </div>
+      </div>
+      <div class="split">
+        <button id="pushAllBtn" class="btn">Push</button>
+        <button id="pushAllMenuBtn" class="btn caret" title="Push options">▾</button>
+        <div class="menu" id="pushAllMenu" hidden>
+          <button data-force="false">Push</button>
+          <button data-force="true" class="danger-item">Force push (--force-with-lease)</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <label class="check selectall">
+      <input type="checkbox" id="selectAll" /> <span id="selectCount">Select all</span>
+    </label>
+    <div class="filters" id="filters">
+      <button class="chip active" data-filter="all">All</button>
+      <button class="chip" data-filter="attention">Needs attention</button>
+      <button class="chip" data-filter="behind">Behind</button>
+      <button class="chip" data-filter="ahead">Ahead</button>
+      <button class="chip" data-filter="dirty">Dirty</button>
+    </div>
+    <input type="search" id="search" class="search" placeholder="Filter by name…" />
+  </div>
+
+  <main id="repoList" class="repo-list"></main>
+
+  <div id="emptyState" class="empty" hidden>
+    <p>No git repositories found in this collection.</p>
+    <button class="btn primary" onclick="addCollection()">Add a folder</button>
+  </div>
+
+  <!-- Detail drawer -->
+  <div id="drawer" class="drawer" hidden>
+    <div class="drawer-backdrop" onclick="closeDrawer()"></div>
+    <aside class="drawer-panel" id="drawerPanel"></aside>
+  </div>
+
+  <!-- Clone modal -->
+  <div id="cloneModal" class="modal" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <h3>Clone repository</h3>
+      <label class="field">
+        <span>Repository URL</span>
+        <input type="text" id="cloneUrl" placeholder="https://github.com/owner/repo.git" />
+      </label>
+      <label class="field">
+        <span>Folder name <em>(optional)</em></span>
+        <input type="text" id="cloneName" placeholder="defaults to repo name" />
+      </label>
+      <div class="modal-actions">
+        <button id="cloneCancel" class="btn ghost">Cancel</button>
+        <button id="cloneGo" class="btn primary">Clone</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add collection modal -->
+  <div id="collectionModal" class="modal" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <h3>Add a collection</h3>
+      <p class="modal-hint">A collection is a folder that contains project repositories. Paste its full path.</p>
+      <label class="field">
+        <span>Folder path</span>
+        <input type="text" id="collectionPath" placeholder="/Users/you/Projects" spellcheck="false" />
+      </label>
+      <div class="modal-actions">
+        <button id="collectionCancel" class="btn ghost">Cancel</button>
+        <button id="collectionGo" class="btn primary">Add folder</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Commit diff modal -->
+  <div id="showModal" class="modal" hidden>
+    <div class="modal-backdrop" onclick="closeShow()"></div>
+    <div class="modal-card wide" id="showCard"></div>
+  </div>
+
+  <!-- Toast / activity log -->
+  <div id="toasts" class="toasts"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
