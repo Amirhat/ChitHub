@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7b4cd6"/>
+      <stop offset="1" stop-color="#2f81f7"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e6edf3"/>
+    </linearGradient>
+  </defs>
+
+  <!-- rounded app tile -->
+  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="#ffffff" opacity="0.06"/>
+
+  <!-- octopus -->
+  <g fill="url(#body)">
+    <!-- head / mantle -->
+    <path d="M512 214
+             c-150 0 -262 104 -262 250
+             v118
+             c0 28 -20 44 -44 52
+             c-34 11 -58 24 -58 52
+             c0 30 30 44 60 38
+             c30 -6 44 -28 70 -28
+             c26 0 38 22 38 50
+             v8
+             c0 30 26 50 56 50
+             c30 0 50 -24 50 -54
+             c0 -28 12 -44 36 -44
+             c24 0 36 16 36 44
+             c0 30 20 54 50 54
+             c30 0 56 -20 56 -50
+             v-8
+             c0 -28 12 -50 38 -50
+             c26 0 40 22 70 28
+             c30 6 60 -8 60 -38
+             c0 -28 -24 -41 -58 -52
+             c-24 -8 -44 -24 -44 -52
+             v-118
+             c0 -146 -112 -250 -262 -250 z"/>
+  </g>
+
+  <!-- eyes -->
+  <g fill="#1a2030">
+    <circle cx="430" cy="470" r="42"/>
+    <circle cx="594" cy="470" r="42"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="444" cy="456" r="13"/>
+    <circle cx="608" cy="456" r="13"/>
+  </g>
+
+  <!-- little smile -->
+  <path d="M462 556 q50 44 100 0" fill="none" stroke="#1a2030" stroke-width="16" stroke-linecap="round"/>
+</svg>

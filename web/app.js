@@ -106,29 +106,36 @@ async function switchCollection(path) {
   } catch (e) { toast("err", "Switch failed", e.message); }
 }
 
-function addCollection() {
+async function addCollection() {
   $("#collectionMenu").hidden = true;
-  $("#collectionModal").hidden = false;
-  const inp = $("#collectionPath");
-  inp.value = "";
-  inp.focus();
-}
-function closeAddCollection() { $("#collectionModal").hidden = true; }
-async function doAddCollection() {
-  const path = $("#collectionPath").value.trim();
-  if (!path) { $("#collectionPath").focus(); return; }
+  let path;
+  try {
+    const res = await api("POST", "/api/pick-folder", {});
+    if (res.error) {
+      // Non-macOS fallback: ask for a path with a styled dialog.
+      path = await promptDialog("Add a collection", {
+        message: "Paste the full path to a folder that holds your project repositories.",
+        label: "Folder path", placeholder: "/path/to/Projects", okLabel: "Add folder",
+      });
+    } else {
+      path = res.path; // empty if the user cancelled the Finder dialog
+    }
+  } catch (e) { toast("err", "Folder picker failed", e.message); return; }
+  if (!path) return;
   try {
     const data = await api("POST", "/api/collections", { action: "add", path });
     CONFIG = { collections: data.collections, active: data.active };
     SELECTED.clear();
-    closeAddCollection();
     renderCollection();
     await load();
   } catch (e) { toast("err", "Could not add folder", e.message); }
 }
 
 async function removeCollection(path) {
-  if (!confirm("Remove this folder from ChitHub's list?\n(The folder and its repos are NOT deleted.)")) return;
+  $("#collectionMenu").hidden = true;
+  if (!(await confirmDialog("Remove collection",
+    "Remove this folder from ChitHub's list?\nThe folder and its repos are NOT deleted.",
+    { okLabel: "Remove", danger: true }))) return;
   try {
     const data = await api("POST", "/api/collections", { action: "remove", path });
     CONFIG = { collections: data.collections, active: data.active };
@@ -338,7 +345,9 @@ const doOp = (name, action) =>
 const doPull = (name, mode) =>
   runOp(name, `pull ${name}`, () => api("POST", `/api/repo/${enc(name)}/pull`, { mode }));
 async function doPush(name, force) {
-  if (force && !confirm(`Force push ${name}? Rewrites remote history (uses --force-with-lease).`)) return;
+  if (force && !(await confirmDialog("Force push",
+    `Force-push ${name}? This rewrites remote history (uses --force-with-lease).`,
+    { okLabel: "Force push", danger: true }))) return;
   return runOp(name, `push ${name}`, () => api("POST", `/api/repo/${enc(name)}/push`, { force }));
 }
 const doStash = (name, action) =>
@@ -349,18 +358,24 @@ async function doReveal(name) {
   catch (e) { toast("err", "Reveal failed", e.message); }
 }
 async function doDiscardAll(name) {
-  if (!confirm(`Discard ALL local changes in ${name}? This cannot be undone.`)) return;
+  if (!(await confirmDialog("Discard all changes",
+    `Discard ALL local changes in ${name}?\nThis can't be undone.`,
+    { okLabel: "Discard all", danger: true }))) return;
   return runOp(name, `discard all · ${name}`, () => api("POST", `/api/repo/${enc(name)}/discard`, {}));
 }
 async function doUndo(name) {
-  if (!confirm(`Undo the last commit in ${name}?\nIts changes return to your working tree (soft reset).`)) return;
+  if (!(await confirmDialog("Undo last commit",
+    `Undo the last commit in ${name}?\nIts changes return to your working tree (soft reset).`,
+    { okLabel: "Undo commit" }))) return;
   return runOp(name, `undo · ${name}`, () => api("POST", `/api/repo/${enc(name)}/undo`, {}));
 }
 async function newBranch(name) {
-  const branch = prompt(`New branch name in ${name}:`);
-  if (!branch || !branch.trim()) return;
+  const branch = await promptDialog(`New branch in ${name}`,
+    { label: "Branch name", placeholder: "feature/my-thing", okLabel: "Create branch" });
+  if (!branch) return;
   await runOp(name, `branch ${name}`,
-    () => api("POST", `/api/repo/${enc(name)}/checkout`, { branch: branch.trim(), create: true }));
+    () => api("POST", `/api/repo/${enc(name)}/checkout`, { branch, create: true }));
+  if (DRAWER && DRAWER.name === name) reloadDrawer();
 }
 
 async function refreshOne(name) {
@@ -504,8 +519,10 @@ async function reloadDrawer(name, view) {
 }
 
 function renderDrawer() {
-  if (DRAWER.view === "pull") return renderPullReview();
-  renderStaging();
+  const panel = $("#drawerPanel");
+  const scroll = panel ? panel.scrollTop : 0;
+  if (DRAWER.view === "pull") renderPullReview(); else renderStaging();
+  if (panel) panel.scrollTop = scroll;
 }
 
 function drawerHead() {
@@ -525,25 +542,80 @@ function branchBar() {
   const d = DRAWER;
   const bar = el("div", "branchbar");
   bar.appendChild(el("span", "bb-label", "⑂"));
-  const sel = el("select", "branch-select");
+
+  // styled branch dropdown
+  const split = el("div", "split branch-switch");
+  const btn = el("button", "btn small branch-current");
+  btn.innerHTML = `<span class="mono">${esc(d.branches.current || "?")}</span> <span class="caret-dim">▾</span>`;
+  const menu = el("div", "menu branch-menu");
+  menu.hidden = true;
   for (const b of d.branches.local || []) {
-    const o = el("option", null, esc(b)); o.value = b;
-    if (b === d.branches.current) o.selected = true;
-    sel.appendChild(o);
+    const mb = el("button", b === d.branches.current ? "bm-active" : "");
+    mb.innerHTML = `<span class="bm-dot">${b === d.branches.current ? "●" : ""}</span><span class="mono">${esc(b)}</span>`;
+    mb.onclick = (e) => { e.stopPropagation(); menu.hidden = true; switchBranch(b); };
+    menu.appendChild(mb);
   }
-  sel.onchange = async () => {
-    const target = sel.value;
-    if (target === d.branches.current) return;
-    if (!confirm(`Switch ${d.name} to branch '${target}'?`)) { sel.value = d.branches.current; return; }
-    await runOp(d.name, `checkout ${target}`,
-      () => api("POST", `/api/repo/${enc(d.name)}/checkout`, { branch: target }));
-  };
-  bar.appendChild(sel);
+  const remotes = (d.branches.remote || []).filter((r) => {
+    const local = r.replace(/^[^/]+\//, "");
+    return !(d.branches.local || []).includes(local);
+  });
+  if (remotes.length) {
+    menu.appendChild(el("div", "bm-divider", "remote branches"));
+    for (const r of remotes) {
+      const local = r.replace(/^[^/]+\//, "");
+      const mb = el("button", null,
+        `<span class="bm-dot"></span><span class="mono">${esc(r)}</span><span class="bm-track">+ track</span>`);
+      mb.onclick = (e) => { e.stopPropagation(); menu.hidden = true; checkoutRemote(local, r); };
+      menu.appendChild(mb);
+    }
+  }
+  btn.onclick = (e) => { e.stopPropagation(); closeAllMenus(); menu.hidden = !menu.hidden; };
+  split.appendChild(btn);
+  split.appendChild(menu);
+  bar.appendChild(split);
+
   bar.appendChild(barBtn("＋ Branch", () => newBranch(d.name)));
   bar.appendChild(barBtn("Stash", () => doStashDrawer("push")));
   if (d.stashes.length) bar.appendChild(barBtn(`Pop (${d.stashes.length})`, () => doStashDrawer("pop")));
   bar.appendChild(barBtn("Reveal", () => doReveal(d.name)));
   return bar;
+}
+
+// switchBranch mirrors GitHub Desktop: if uncommitted changes would block the
+// switch, it offers to stash them (and pop later), instead of just erroring.
+async function switchBranch(target) {
+  const d = DRAWER;
+  if (!d || target === d.branches.current) return;
+  const t = toast("run", `switch → ${target}`, "git checkout…");
+  setBusy(d.name, true);
+  try {
+    let res = await api("POST", `/api/repo/${enc(d.name)}/checkout`, { branch: target });
+    if (!res.ok && /would be overwritten|stash them before|commit your changes/i.test(res.output || "")) {
+      const choice = await dialog({
+        title: `Switch to “${target}”`,
+        message: `You have uncommitted changes that would be overwritten by switching to “${target}”.\n\nChitHub can stash them, switch, and you can pop them back anytime with the Stash button.`,
+        buttons: [
+          { label: "Cancel", value: "cancel", kind: "ghost" },
+          { label: "Stash & Switch", value: "stash", kind: "primary" },
+        ],
+      });
+      if (choice !== "stash") { finishToast(t, { ok: false, output: "Cancelled — staying on " + d.branches.current }); return; }
+      res = await api("POST", `/api/repo/${enc(d.name)}/checkout`, { branch: target, stash: true });
+    }
+    finishToast(t, res);
+  } catch (e) {
+    finishToast(t, { ok: false, output: e.message });
+  } finally {
+    setBusy(d.name, false);
+    await refreshOne(d.name);
+    if (DRAWER && DRAWER.name === d.name) await reloadDrawer();
+  }
+}
+
+async function checkoutRemote(local, remoteRef) {
+  await runOp(DRAWER.name, `track ${remoteRef}`,
+    () => api("POST", `/api/repo/${enc(DRAWER.name)}/checkout`, { branch: local, create: true, startPoint: remoteRef }));
+  if (DRAWER) reloadDrawer();
 }
 
 function syncRow() {
@@ -667,7 +739,7 @@ function fileRow(f) {
   disc.title = "Discard this file";
   disc.onclick = async (e) => {
     e.stopPropagation();
-    if (!confirm(`Discard changes in ${f.path}?`)) return;
+    if (!(await confirmDialog("Discard changes", `Discard all changes in ${f.path}?\nThis can't be undone.`, { okLabel: "Discard", danger: true }))) return;
     await runOp(DRAWER.name, `discard ${f.path}`,
       () => api("POST", `/api/repo/${enc(DRAWER.name)}/discard`, { paths: [f.path] }));
   };
@@ -681,23 +753,33 @@ function fileRow(f) {
     else if (!f.diff) body.appendChild(el("div", "diff-msg", "No diff."));
     else if (f.diff.binary) body.appendChild(el("div", "diff-msg", "Binary file."));
     else if (f.diff.tooLarge) body.appendChild(el("div", "diff-msg", "Diff too large to display."));
-    else for (const h of f.diff.hunks) body.appendChild(hunkView(f, h));
+    else for (const h of f.diff.hunks) body.appendChild(hunkView(f, h, f.untracked));
     wrap.appendChild(body);
   }
   return wrap;
 }
 
-function hunkView(f, h) {
+// hunkSelState reports whether a hunk's changed lines are all/some/none selected.
+function hunkSelState(h) {
+  let total = 0, on = 0;
+  for (const ln of h.lines) if (ln.t !== " ") { total++; if (ln.sel) on++; }
+  if (total === 0 || on === total) return "all";
+  return on === 0 ? "none" : "partial";
+}
+
+function hunkView(f, h, readonly) {
   const block = el("div", "hunk");
   const hh = el("div", "hunk-head");
-  if (!f.untracked) {
+  if (!readonly) {
     const cb = el("input", "hcb");
     cb.type = "checkbox";
-    cb.checked = f.selectedHunks ? f.selectedHunks.has(h.index) : (f.sel !== "none");
+    const st = hunkSelState(h);
+    cb.checked = st !== "none";
+    cb.indeterminate = st === "partial";
     cb.onclick = (e) => {
       e.stopPropagation();
-      ensureHunkSet(f);
-      if (cb.checked) f.selectedHunks.add(h.index); else f.selectedHunks.delete(h.index);
+      const on = cb.checked;
+      for (const ln of h.lines) if (ln.t !== " ") ln.sel = on;
       recomputeSel(f);
       renderDrawer();
     };
@@ -705,15 +787,24 @@ function hunkView(f, h) {
   }
   hh.appendChild(el("span", "hunk-header mono", esc(h.header)));
   block.appendChild(hh);
-  block.appendChild(diffLines(h));
+  block.appendChild(diffLines(f, h, readonly));
   return block;
 }
 
-function diffLines(h) {
+function diffLines(f, h, readonly) {
   const lines = el("div", "hunk-lines mono");
   for (const ln of h.lines) {
+    const changed = ln.t === "+" || ln.t === "-";
     const cls = ln.t === "+" ? "add" : ln.t === "-" ? "del" : "ctx";
-    const row = el("div", "dl " + cls);
+    const selectable = changed && !readonly;
+    const row = el("div", "dl " + cls + (selectable ? " selectable" : "") + (changed && !ln.sel ? " off" : ""));
+    if (selectable) {
+      row.title = ln.sel ? "Click to exclude this line from the commit" : "Click to include this line";
+      row.onclick = () => { ln.sel = !ln.sel; recomputeSel(f); renderDrawer(); };
+      row.appendChild(el("span", "dl-pick", ln.sel ? "✓" : ""));
+    } else {
+      row.appendChild(el("span", "dl-pick"));
+    }
     row.appendChild(el("span", "dl-sign", ln.t === " " ? "" : ln.t));
     row.appendChild(el("span", "dl-text", esc(ln.c) || "&nbsp;"));
     lines.appendChild(row);
@@ -728,8 +819,7 @@ async function toggleFile(f) {
     renderDrawer();
     try {
       f.diff = await api("GET", `/api/repo/${enc(DRAWER.name)}/diff?path=${enc(f.path)}`);
-      ensureHunkSet(f);
-      if (f.sel === "all") (f.diff.hunks || []).forEach((h) => f.selectedHunks.add(h.index));
+      annotateLines(f);
     } catch (e) {
       toast("err", "Diff failed", e.message);
     } finally {
@@ -739,24 +829,30 @@ async function toggleFile(f) {
   renderDrawer();
 }
 
-function ensureHunkSet(f) {
-  if (!f.selectedHunks) {
-    f.selectedHunks = new Set();
-    if (f.sel !== "none" && f.diff) (f.diff.hunks || []).forEach((h) => f.selectedHunks.add(h.index));
+// annotateLines gives every changed line a `sel` flag, seeded from the file's
+// current checkbox state (default: included).
+function annotateLines(f) {
+  const on = f.sel !== "none";
+  for (const h of (f.diff.hunks || [])) {
+    for (const ln of h.lines) {
+      if ((ln.t === "+" || ln.t === "-") && ln.sel === undefined) ln.sel = on;
+    }
   }
 }
+
 function setFileSel(f, sel) {
   f.sel = sel;
   if (f.diff && !f.untracked) {
-    f.selectedHunks = new Set();
-    if (sel === "all") (f.diff.hunks || []).forEach((h) => f.selectedHunks.add(h.index));
+    const on = sel === "all";
+    for (const h of (f.diff.hunks || [])) for (const ln of h.lines) if (ln.t !== " ") ln.sel = on;
   }
 }
+
 function recomputeSel(f) {
   if (!f.diff) return;
-  const total = (f.diff.hunks || []).length;
-  const sel = f.selectedHunks ? f.selectedHunks.size : 0;
-  f.sel = sel === 0 ? "none" : sel === total ? "all" : "partial";
+  let total = 0, on = 0;
+  for (const h of (f.diff.hunks || [])) for (const ln of h.lines) if (ln.t !== " ") { total++; if (ln.sel) on++; }
+  f.sel = total === 0 ? "all" : on === 0 ? "none" : on === total ? "all" : "partial";
 }
 function fileCls(f) {
   if (f.untracked) return "untracked";
@@ -765,12 +861,44 @@ function fileCls(f) {
 }
 
 function buildCommitFiles() {
-  return DRAWER.files
-    .filter((f) => f.sel !== "none")
-    .map((f) => {
-      if (f.untracked || f.sel === "all" || !f.selectedHunks) return { path: f.path, mode: "all" };
-      return { path: f.path, mode: "hunks", hunks: [...f.selectedHunks].sort((a, b) => a - b) };
-    });
+  const out = [];
+  for (const f of DRAWER.files) {
+    if (f.sel === "none") continue;
+    if (f.untracked || f.sel === "all" || !f.diff) { out.push({ path: f.path, mode: "all" }); continue; }
+    const patch = buildFilePatch(f);
+    if (patch) out.push({ path: f.path, mode: "patch", patch });
+  }
+  return out;
+}
+
+// buildFilePatch reconstructs a unified diff containing only the selected lines:
+// unselected additions are dropped, unselected deletions become context. Counts
+// are recomputed; `git apply --recount` tidies the rest.
+function buildFilePatch(f) {
+  if (!f.diff || !f.diff.preamble) return null;
+  let body = "";
+  for (const h of f.diff.hunks) {
+    let oldc = 0, newc = 0, has = false;
+    const lines = [];
+    for (const ln of h.lines) {
+      if (ln.t === " ") { lines.push(" " + ln.c); oldc++; newc++; }
+      else if (ln.t === "+") {
+        if (ln.sel) { lines.push("+" + ln.c); newc++; has = true; }
+      } else if (ln.t === "-") {
+        if (ln.sel) { lines.push("-" + ln.c); oldc++; has = true; }
+        else { lines.push(" " + ln.c); oldc++; newc++; }
+      }
+    }
+    if (!has) continue;
+    const m = h.header.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    const oldStart = m ? m[1] : "1";
+    const newStart = m ? m[2] : "1";
+    body += `@@ -${oldStart},${oldc} +${newStart},${newc} @@\n` + lines.join("\n") + "\n";
+  }
+  if (!body) return null;
+  let pre = f.diff.preamble;
+  if (!pre.endsWith("\n")) pre += "\n";
+  return pre + body;
 }
 
 async function doCommit(push) {
@@ -798,7 +926,9 @@ async function doAmend() {
   const files = buildCommitFiles();
   const msg = (d.draftMsg || "").trim();
   const note = files.length ? `fold ${files.length} selected file(s) into` : "reword";
-  if (!confirm(`Amend the last commit (${note} it)?\nThis rewrites the last commit.`)) return;
+  if (!(await confirmDialog("Amend last commit",
+    `${note.charAt(0).toUpperCase() + note.slice(1)} the last commit?\nThis rewrites it.`,
+    { okLabel: "Amend" }))) return;
   const t = toast("run", `amend ${d.name}`, "git commit --amend…");
   try {
     const res = await api("POST", `/api/repo/${enc(d.name)}/amend`, { message: msg, files });
@@ -884,7 +1014,7 @@ async function openShow(name, commit) {
       else for (const h of fd.hunks) {
         const block = el("div", "hunk");
         block.appendChild(el("div", "hunk-head", `<span class="hunk-header mono">${esc(h.header)}</span>`));
-        block.appendChild(diffLines(h));
+        block.appendChild(diffLines(null, h, true));
         body.appendChild(block);
       }
       wrap.appendChild(body);
@@ -936,6 +1066,80 @@ function finishToast(t, res) {
   if (res.ok) setTimeout(() => t.remove(), 4500);
 }
 
+// ---------- Styled dialogs (replace browser alert/confirm/prompt) ----------
+function dialog(opts) {
+  return new Promise((resolve) => {
+    const modal = el("div", "modal dialog-modal");
+    const backdrop = el("div", "modal-backdrop");
+    const card = el("div", "modal-card dialog-card");
+    if (opts.title) card.appendChild(el("h3", null, esc(opts.title)));
+    if (opts.message) {
+      const m = el("div", "dialog-msg");
+      m.innerHTML = esc(opts.message).replace(/\n/g, "<br>");
+      card.appendChild(m);
+    }
+    let input = null;
+    if (opts.input) {
+      const field = el("label", "field");
+      if (opts.input.label) field.appendChild(el("span", null, esc(opts.input.label)));
+      input = el("input");
+      input.type = "text";
+      input.value = opts.input.value || "";
+      input.placeholder = opts.input.placeholder || "";
+      input.spellcheck = false;
+      field.appendChild(input);
+      card.appendChild(field);
+    }
+    const actions = el("div", "modal-actions");
+    const buttons = opts.buttons || [
+      { label: "Cancel", value: false, kind: "ghost" },
+      { label: "OK", value: true, kind: "primary" },
+    ];
+    const cancelVal = opts.input ? false : false;
+    const finish = (val) => { modal.remove(); document.removeEventListener("keydown", onKey, true); resolve(val); };
+    const valueOf = (b) => (input && b.value !== false && b.value !== "cancel") ? input.value.trim() : b.value;
+    for (const b of buttons) {
+      const btn = el("button", "btn " + (b.kind || ""), esc(b.label));
+      btn.onclick = () => finish(valueOf(b));
+      actions.appendChild(btn);
+    }
+    card.appendChild(actions);
+    backdrop.onclick = () => finish(cancelVal);
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(cancelVal); }
+      else if (e.key === "Enter") {
+        const primary = buttons.find((b) => b.kind === "primary") || buttons[buttons.length - 1];
+        e.preventDefault(); e.stopPropagation(); finish(valueOf(primary));
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    modal.appendChild(backdrop);
+    modal.appendChild(card);
+    document.body.appendChild(modal);
+    setTimeout(() => { (input || card.querySelector(".btn.primary") || card.querySelector(".btn")).focus(); }, 20);
+  });
+}
+
+function confirmDialog(title, message, opts = {}) {
+  return dialog({
+    title, message,
+    buttons: [
+      { label: opts.cancelLabel || "Cancel", value: false, kind: "ghost" },
+      { label: opts.okLabel || "OK", value: true, kind: opts.danger ? "danger" : "primary" },
+    ],
+  });
+}
+function promptDialog(title, opts = {}) {
+  return dialog({
+    title, message: opts.message,
+    input: { label: opts.label, placeholder: opts.placeholder, value: opts.value || "" },
+    buttons: [
+      { label: "Cancel", value: false, kind: "ghost" },
+      { label: opts.okLabel || "OK", value: true, kind: "primary" },
+    ],
+  });
+}
+
 // ---------- Helpers ----------
 function esc(s) {
   return String(s == null ? "" : s)
@@ -959,11 +1163,6 @@ function init() {
   $("#cloneCancel").onclick = closeClone;
   $("#cloneGo").onclick = doClone;
   $("#cloneModal").querySelector(".modal-backdrop").onclick = closeClone;
-
-  $("#collectionCancel").onclick = closeAddCollection;
-  $("#collectionGo").onclick = doAddCollection;
-  $("#collectionModal").querySelector(".modal-backdrop").onclick = closeAddCollection;
-  $("#collectionPath").onkeydown = (e) => { if (e.key === "Enter") doAddCollection(); };
 
   const cBtn = $("#collectionBtn"), cMenu = $("#collectionMenu");
   cBtn.onclick = (e) => { e.stopPropagation(); closeAllMenus(); cMenu.hidden = !cMenu.hidden; };
@@ -995,10 +1194,10 @@ function init() {
 
   document.addEventListener("click", closeAllMenus);
   document.addEventListener("keydown", (e) => {
+    if (document.querySelector(".dialog-modal")) return; // a styled dialog handles its own keys
     if (e.key === "Escape") {
       if (!$("#showModal").hidden) closeShow();
       else if (!$("#cloneModal").hidden) closeClone();
-      else if (!$("#collectionModal").hidden) closeAddCollection();
       else if (REVIEW) reviewExit();
       else { closeDrawer(); closeAllMenus(); }
     }
@@ -1011,7 +1210,7 @@ function init() {
   load();
   setInterval(() => {
     if (document.visibilityState === "visible" && !DRAWER && !REVIEW &&
-        $("#cloneModal").hidden && $("#showModal").hidden && $("#collectionModal").hidden) load();
+        $("#cloneModal").hidden && $("#showModal").hidden && !document.querySelector(".dialog-modal")) load();
   }, 60000);
 }
 

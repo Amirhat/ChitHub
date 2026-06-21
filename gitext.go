@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -26,6 +27,7 @@ type FileDiff struct {
 	Binary    bool   `json:"binary"`
 	TooLarge  bool   `json:"tooLarge"`
 	Untracked bool   `json:"untracked"`
+	Preamble  string `json:"preamble"` // diff header (before the first @@), for rebuilding patches
 	Hunks     []Hunk `json:"hunks"`
 }
 
@@ -35,11 +37,13 @@ type BranchInfo struct {
 	Remote  []string `json:"remote"`
 }
 
-// CommitFile is one selected entry in a selective commit.
+// CommitFile is one selected entry in a selective commit. Mode "all" stages the
+// whole file; mode "patch" applies the supplied unified diff (built client-side
+// from the exact hunks/lines the user ticked) to the index.
 type CommitFile struct {
 	Path  string `json:"path"`
-	Mode  string `json:"mode"` // "all" | "hunks"
-	Hunks []int  `json:"hunks"`
+	Mode  string `json:"mode"`  // "all" | "patch"
+	Patch string `json:"patch"` // unified diff for mode "patch"
 }
 
 // ---- branches ----
@@ -66,8 +70,17 @@ func repoBranches(root, name string) BranchInfo {
 	return b
 }
 
-func checkoutBranch(root, name, branch string, create bool, startPoint string) OpResult {
+func checkoutBranch(root, name, branch string, create bool, startPoint string, stash bool) OpResult {
 	dir := filepath.Join(root, name)
+	var pre string
+	if stash {
+		o, e := runGit(dir, 30*time.Second, "stash", "push", "-u", "-m",
+			"chithub: auto-stash before switching to "+branch)
+		if e != nil {
+			return mkResult(name, "checkout", o, e)
+		}
+		pre = strings.TrimSpace(o)
+	}
 	args := []string{"checkout"}
 	if create {
 		args = append(args, "-b", branch)
@@ -78,7 +91,12 @@ func checkoutBranch(root, name, branch string, create bool, startPoint string) O
 		args = append(args, branch)
 	}
 	out, err := runGit(dir, 30*time.Second, args...)
-	return mkResult(name, "checkout", out, err)
+	res := mkResult(name, "checkout", out, err)
+	if pre != "" && res.OK {
+		res.Output = strings.TrimSpace(pre + "\n" + res.Output +
+			"\n(your changes were stashed — pop them with the Stash button)")
+	}
+	return res
 }
 
 // ---- discard ----
@@ -205,7 +223,8 @@ func fileDiff(root, name, path string) FileDiff {
 		fd.TooLarge = true
 		return fd
 	}
-	_, hunks := splitDiffRaw(out)
+	preamble, hunks := splitDiffRaw(out)
+	fd.Preamble = preamble
 	for i, h := range hunks {
 		fd.Hunks = append(fd.Hunks, hunkToDisplay(i, h))
 	}
@@ -221,18 +240,14 @@ func stageSelection(dir string, files []CommitFile) (int, string, error) {
 	_, _ = runGit(dir, 15*time.Second, "reset", "-q")
 	touched := 0
 	for _, f := range files {
-		if f.Mode == "hunks" && len(f.Hunks) > 0 {
-			diff, err := runGit(dir, 15*time.Second, "diff", "--no-color", "-U3", "--", f.Path)
-			if err != nil {
-				return touched, diff, err
-			}
-			patch := buildHunkPatch(diff, f.Hunks)
-			if strings.TrimSpace(patch) == "" {
-				continue
+		if f.Mode == "patch" && strings.TrimSpace(f.Patch) != "" {
+			patch := f.Patch
+			if !strings.HasSuffix(patch, "\n") {
+				patch += "\n"
 			}
 			if o, e := runGitStdin(dir, 20*time.Second, patch,
 				"apply", "--cached", "--whitespace=nowarn", "--recount", "-"); e != nil {
-				return touched, "failed to stage hunks:\n" + o, e
+				return touched, "failed to stage selection in " + f.Path + ":\n" + o, e
 			}
 		} else {
 			if o, e := runGit(dir, 15*time.Second, "add", "-A", "--", f.Path); e != nil {
@@ -443,30 +458,6 @@ func hunkToDisplay(idx int, text string) Hunk {
 	return h
 }
 
-// buildHunkPatch reconstructs an applyable patch from the preamble plus the
-// selected hunks (byte-exact subset of the original diff).
-func buildHunkPatch(diff string, indices []int) string {
-	preamble, hunks := splitDiffRaw(diff)
-	if len(hunks) == 0 {
-		return ""
-	}
-	want := make(map[int]bool, len(indices))
-	for _, i := range indices {
-		want[i] = true
-	}
-	var b strings.Builder
-	b.WriteString(preamble)
-	if !strings.HasSuffix(preamble, "\n") {
-		b.WriteByte('\n')
-	}
-	for i, h := range hunks {
-		if want[i] {
-			b.WriteString(h)
-		}
-	}
-	return b.String()
-}
-
 func splitLines(s string) []string {
 	var out []string
 	for _, l := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
@@ -479,6 +470,22 @@ func splitLines(s string) []string {
 }
 
 // ---- OS reveal ----
+
+// pickFolder shows a native folder chooser (macOS) and returns the chosen path.
+// Returns an empty string with no error when the user cancels.
+func pickFolder() (string, error) {
+	switch runtime.GOOS {
+	case "darwin":
+		out, err := exec.Command("osascript", "-e",
+			`POSIX path of (choose folder with prompt "Select a folder that contains your repositories")`).Output()
+		if err != nil {
+			return "", nil // cancelled or no GUI session
+		}
+		return strings.TrimSpace(string(out)), nil
+	default:
+		return "", errors.New("native folder picker is only available on macOS")
+	}
+}
 
 func revealInFinder(path string) error {
 	var cmd *exec.Cmd

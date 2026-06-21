@@ -23,6 +23,7 @@ func (a *App) root() string {
 func (a *App) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/config", a.handleGetConfig)
 	mux.HandleFunc("POST /api/collections", a.handleCollections)
+	mux.HandleFunc("POST /api/pick-folder", a.handlePickFolder)
 	mux.HandleFunc("GET /api/review", a.handleReview)
 	mux.HandleFunc("GET /api/repos", a.handleRepos)
 	mux.HandleFunc("GET /api/repo/{name}", a.handleRepoDetail)
@@ -253,13 +254,23 @@ func (a *App) handleCheckout(w http.ResponseWriter, r *http.Request) {
 		Branch     string `json:"branch"`
 		Create     bool   `json:"create"`
 		StartPoint string `json:"startPoint"`
+		Stash      bool   `json:"stash"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	if strings.TrimSpace(body.Branch) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "branch is required"})
 		return
 	}
-	writeJSON(w, http.StatusOK, checkoutBranch(a.root(), name, strings.TrimSpace(body.Branch), body.Create, body.StartPoint))
+	writeJSON(w, http.StatusOK, checkoutBranch(a.root(), name, strings.TrimSpace(body.Branch), body.Create, body.StartPoint, body.Stash))
+}
+
+func (a *App) handlePickFolder(w http.ResponseWriter, r *http.Request) {
+	path, err := pickFolder()
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"path": path})
 }
 
 func (a *App) handleDiscard(w http.ResponseWriter, r *http.Request) {
