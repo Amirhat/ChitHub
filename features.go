@@ -141,21 +141,47 @@ func cherryPick(root, name, hash string) OpResult {
 	return mkResult(name, "cherry-pick", out, err)
 }
 
-func resetTo(root, name, hash, mode string) OpResult {
+// resetTo moves the current branch to hash. mode is soft|mixed|hard. When
+// backup is set, a recovery branch is created at the current HEAD *before* the
+// reset, so a "hard" reset that drops commits stays trivially recoverable.
+func resetTo(root, name, hash, mode string, backup bool) OpResult {
 	if !isHexish(hash) {
 		return OpResult{Repo: name, Action: "reset", OK: false, Output: "invalid commit"}
 	}
-	flag := "--mixed"
-	switch mode {
-	case "soft":
-		flag = "--soft"
-	case "hard":
-		flag = "--hard"
+	if mode != "soft" && mode != "mixed" && mode != "hard" {
+		return OpResult{Repo: name, Action: "reset", OK: false, Output: "invalid reset mode"}
 	}
-	out, err := runGit(filepath.Join(root, name), 30*time.Second, "reset", flag, hash)
+	dir := filepath.Join(root, name)
+
+	// Remember where we are so we can tell the user how to recover.
+	headBefore := ""
+	if out, err := runGit(dir, 10*time.Second, "rev-parse", "HEAD"); err == nil {
+		headBefore = strings.TrimSpace(out)
+	}
+
+	backupRef := ""
+	if backup {
+		backupRef = "chithub/backup-" + time.Now().Format("20060102-150405")
+		if out, err := runGit(dir, 15*time.Second, "branch", backupRef, "HEAD"); err != nil {
+			return mkResult(name, "reset", "Could not create safety backup branch: "+out, err)
+		}
+	}
+
+	flag := map[string]string{"soft": "--soft", "mixed": "--mixed", "hard": "--hard"}[mode]
+	out, err := runGit(dir, 30*time.Second, "reset", flag, hash)
 	r := mkResult(name, "reset", out, err)
-	if r.OK && r.Output == "" {
-		r.Output = "Reset " + mode + " to " + hash[:min(7, len(hash))] + "."
+	if r.OK {
+		msg := "Reset " + mode + " to " + hash[:min(7, len(hash))] + "."
+		if backupRef != "" {
+			msg += " Safety branch '" + backupRef + "' points at your previous state."
+		} else if mode == "hard" && headBefore != "" {
+			msg += " Previous tip was " + headBefore[:min(7, len(headBefore))] + " (recoverable from the reflog)."
+		}
+		if strings.TrimSpace(r.Output) == "" {
+			r.Output = msg
+		} else {
+			r.Output = msg + "\n" + strings.TrimSpace(r.Output)
+		}
 	}
 	return r
 }

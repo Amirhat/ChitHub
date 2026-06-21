@@ -187,11 +187,12 @@ func (a *App) handleReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Hash string `json:"hash"`
-		Mode string `json:"mode"`
+		Hash   string `json:"hash"`
+		Mode   string `json:"mode"`
+		Backup bool   `json:"backup"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
-	writeJSON(w, http.StatusOK, resetTo(a.root(), name, strings.TrimSpace(body.Hash), body.Mode))
+	writeJSON(w, http.StatusOK, resetTo(a.root(), name, strings.TrimSpace(body.Hash), body.Mode, body.Backup))
 }
 
 func (a *App) opWithHash(w http.ResponseWriter, r *http.Request, fn func(root, name, hash string) OpResult) {

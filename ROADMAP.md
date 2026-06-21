@@ -21,7 +21,10 @@ tests) and live-verified:
 - **Branches:** delete / rename / merge / rebase (+ a conflict resolution UI with
   ours/theirs/edit and continue/abort/skip).
 - **History:** full paginated history with a **commit graph**, search, and per-commit
-  **revert / cherry-pick / reset (soft·mixed·hard) / tag / view diff**. **Tags** manager.
+  **revert / cherry-pick / reset / tag / view diff**. **Tags** manager.
+- **Guided reset:** a dedicated **soft / mixed / hard** reset dialog that spells out
+  what each mode keeps or discards, warns before a destructive hard reset, and can
+  create a **safety backup branch** at the current tip first (recoverable in one click).
 - **Multi-repo:** **bulk commit** (one message), **bulk branch switch/create**,
   **cross-repo search**, **run a command in every repo**, **workspace snapshots**.
 - **Integrations:** open on web / in editor / in terminal; CI status via `gh`;

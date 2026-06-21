@@ -5,17 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ChitHub</title>
   <link rel="stylesheet" href="style.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐙</text></svg>" />
+  <link rel="icon" type="image/svg+xml" href="logo.svg" />
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="logo">🐙</span>
+      <img class="logo" src="logo.svg" width="30" height="30" alt="ChitHub" />
       <div class="brand-text">
         <h1>ChitHub</h1>
         <div class="split collection">
           <button id="collectionBtn" class="collection-btn" title="Active collection — click to switch folders">
-            <span class="folder-ic">🗂️</span>
+            <svg class="folder-ic" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+              <path fill="currentColor" d="M1.75 2.5h3.69c.46 0 .9.18 1.23.5l.83.83h5.75c.97 0 1.75.78 1.75 1.75v6.42c0 .97-.78 1.75-1.75 1.75H1.75A1.75 1.75 0 0 1 0 12.5V4.25C0 3.28.78 2.5 1.75 2.5Z"/>
+            </svg>
             <span id="collectionName">…</span>
             <span class="caret-dim">▾</span>
           </button>

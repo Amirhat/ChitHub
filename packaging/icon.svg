@@ -1,57 +1,70 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#7b4cd6"/>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8a5cf6"/>
+      <stop offset=".55" stop-color="#5468f0"/>
       <stop offset="1" stop-color="#2f81f7"/>
     </linearGradient>
-    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="head" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#e6edf3"/>
+      <stop offset="1" stop-color="#dbe4ee"/>
     </linearGradient>
+    <radialGradient id="sheen" cx=".34" cy=".26" r=".75">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#0a0f1c" flood-opacity="0.28"/>
+    </filter>
   </defs>
 
   <!-- rounded app tile -->
-  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#bg)"/>
-  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="#ffffff" opacity="0.06"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#tile)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#sheen)"/>
 
-  <!-- octopus -->
-  <g fill="url(#body)">
-    <!-- head / mantle -->
-    <path d="M512 214
-             c-150 0 -262 104 -262 250
-             v118
-             c0 28 -20 44 -44 52
-             c-34 11 -58 24 -58 52
-             c0 30 30 44 60 38
-             c30 -6 44 -28 70 -28
-             c26 0 38 22 38 50
-             v8
-             c0 30 26 50 56 50
-             c30 0 50 -24 50 -54
-             c0 -28 12 -44 36 -44
-             c24 0 36 16 36 44
-             c0 30 20 54 50 54
-             c30 0 56 -20 56 -50
-             v-8
-             c0 -28 12 -50 38 -50
-             c26 0 40 22 70 28
-             c30 6 60 -8 60 -38
-             c0 -28 -24 -41 -58 -52
-             c-24 -8 -44 -24 -44 -52
-             v-118
-             c0 -146 -112 -250 -262 -250 z"/>
+  <!-- octopus: tentacles end in git commit-nodes (a multi-repo graph motif) -->
+  <g fill="none" stroke-linecap="round" stroke-width="38" filter="url(#soft)">
+    <path d="M412 512 C 366 580, 300 606, 270 690"  stroke="#f78166"/>
+    <path d="M454 540 C 424 624, 364 690, 350 766"  stroke="#a371f7"/>
+    <path d="M492 552 C 480 626, 452 682, 444 742"  stroke="#56d364"/>
+    <path d="M532 552 C 544 626, 572 682, 580 742"  stroke="#2f81f7"/>
+    <path d="M570 540 C 600 624, 660 690, 674 766"  stroke="#db61a2"/>
+    <path d="M612 512 C 658 580, 724 606, 754 690"  stroke="#e3b341"/>
   </g>
+  <!-- commit nodes at the tentacle tips -->
+  <g stroke="#ffffff" stroke-width="9">
+    <circle cx="270" cy="690" r="25" fill="#f78166"/>
+    <circle cx="350" cy="766" r="25" fill="#a371f7"/>
+    <circle cx="444" cy="742" r="25" fill="#56d364"/>
+    <circle cx="580" cy="742" r="25" fill="#2f81f7"/>
+    <circle cx="674" cy="766" r="25" fill="#db61a2"/>
+    <circle cx="754" cy="690" r="25" fill="#e3b341"/>
+  </g>
+
+  <!-- head / mantle -->
+  <g filter="url(#soft)">
+    <path d="M512 250
+             c-126 0 -210 86 -210 196
+             c0 70 30 118 30 150
+             c0 30 -26 40 -26 40
+             h412
+             c0 0 -26 -10 -26 -40
+             c0 -32 30 -80 30 -150
+             c0 -110 -84 -196 -210 -196 z"
+          fill="url(#head)"/>
+  </g>
+  <ellipse cx="430" cy="378" rx="86" ry="74" fill="#ffffff" opacity="0.55"/>
 
   <!-- eyes -->
-  <g fill="#1a2030">
-    <circle cx="430" cy="470" r="42"/>
-    <circle cx="594" cy="470" r="42"/>
+  <g fill="#1d2433">
+    <ellipse cx="446" cy="452" rx="34" ry="40"/>
+    <ellipse cx="578" cy="452" rx="34" ry="40"/>
   </g>
   <g fill="#ffffff">
-    <circle cx="444" cy="456" r="13"/>
-    <circle cx="608" cy="456" r="13"/>
+    <circle cx="458" cy="436" r="11"/>
+    <circle cx="590" cy="436" r="11"/>
   </g>
 
-  <!-- little smile -->
-  <path d="M462 556 q50 44 100 0" fill="none" stroke="#1a2030" stroke-width="16" stroke-linecap="round"/>
+  <!-- friendly smile -->
+  <path d="M474 532 q38 36 76 0" fill="none" stroke="#1d2433" stroke-width="15" stroke-linecap="round"/>
 </svg>

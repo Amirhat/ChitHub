@@ -445,3 +445,107 @@ func mustOKBulk(t *testing.T, rs []OpResult) {
 		}
 	}
 }
+
+// TestResetModes exercises soft / mixed / hard reset and the safety backup
+// branch on throwaway temp repos — never a real working branch.
+func TestResetModes(t *testing.T) {
+	root := t.TempDir()
+
+	// build makes name/ with commits c1..c3 touching f.txt; returns dir, c1, c3.
+	build := func(name string) (dir, c1, c3 string) {
+		dir = initRepo(t, root, name)
+		commitFile(t, dir, "f.txt", "v1\n", "c1")
+		c1 = strings.TrimSpace(git(t, dir, "rev-parse", "HEAD"))
+		commitFile(t, dir, "f.txt", "v1\nv2\n", "c2")
+		commitFile(t, dir, "f.txt", "v1\nv2\nv3\n", "c3")
+		c3 = strings.TrimSpace(git(t, dir, "rev-parse", "HEAD"))
+		return
+	}
+	read := func(dir string) string {
+		b, err := os.ReadFile(filepath.Join(dir, "f.txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+
+	soft, softC1, _ := build("soft")
+	mixed, mixedC1, _ := build("mixed")
+	hard, hardC1, hardC3 := build("hard")
+	plain, plainC1, plainC3 := build("plain")
+	bad, _, _ := build("bad")
+
+	srv := newServer(t, root)
+
+	// --- soft: HEAD moves; later work kept STAGED; working tree untouched ---
+	mustOK(t, op(t, srv, "/api/repo/soft/reset", map[string]any{"hash": softC1, "mode": "soft"}))
+	if head := strings.TrimSpace(git(t, soft, "rev-parse", "HEAD")); head != softC1 {
+		t.Fatalf("soft: HEAD = %s, want %s", head, softC1)
+	}
+	if got := read(soft); got != "v1\nv2\nv3\n" {
+		t.Errorf("soft must not touch the working tree, got %q", got)
+	}
+	if staged := git(t, soft, "diff", "--cached", "--name-only"); !strings.Contains(staged, "f.txt") {
+		t.Error("soft must keep later changes staged")
+	}
+
+	// --- mixed: HEAD moves; later work kept UNSTAGED in the working tree ---
+	mustOK(t, op(t, srv, "/api/repo/mixed/reset", map[string]any{"hash": mixedC1, "mode": "mixed"}))
+	if head := strings.TrimSpace(git(t, mixed, "rev-parse", "HEAD")); head != mixedC1 {
+		t.Fatalf("mixed: HEAD = %s, want %s", head, mixedC1)
+	}
+	if got := read(mixed); got != "v1\nv2\nv3\n" {
+		t.Errorf("mixed must not touch the working tree, got %q", got)
+	}
+	if staged := strings.TrimSpace(git(t, mixed, "diff", "--cached", "--name-only")); staged != "" {
+		t.Errorf("mixed must stage nothing, got %q", staged)
+	}
+	if un := git(t, mixed, "diff", "--name-only"); !strings.Contains(un, "f.txt") {
+		t.Error("mixed must leave later changes unstaged")
+	}
+
+	// --- hard + backup: later work discarded, but a safety branch keeps it ---
+	r := op(t, srv, "/api/repo/hard/reset", map[string]any{"hash": hardC1, "mode": "hard", "backup": true})
+	mustOK(t, r)
+	if head := strings.TrimSpace(git(t, hard, "rev-parse", "HEAD")); head != hardC1 {
+		t.Fatalf("hard: HEAD = %s, want %s", head, hardC1)
+	}
+	if got := read(hard); got != "v1\n" {
+		t.Errorf("hard must discard later work, got %q", got)
+	}
+	branches := strings.TrimSpace(git(t, hard, "branch", "--list", "chithub/backup-*"))
+	if branches == "" {
+		t.Fatal("hard+backup must create a chithub/backup-* safety branch")
+	}
+	backupName := strings.TrimSpace(strings.TrimPrefix(branches, "*"))
+	if tip := strings.TrimSpace(git(t, hard, "rev-parse", backupName)); tip != hardC3 {
+		t.Errorf("safety branch points at %s, want previous tip %s", tip, hardC3)
+	}
+	if !strings.Contains(r.Output, "Safety branch") {
+		t.Errorf("output should mention the safety branch: %q", r.Output)
+	}
+
+	// --- hard WITHOUT backup: still works; no safety branch; reflog hint shown ---
+	r2 := op(t, srv, "/api/repo/plain/reset", map[string]any{"hash": plainC1, "mode": "hard"})
+	mustOK(t, r2)
+	if head := strings.TrimSpace(git(t, plain, "rev-parse", "HEAD")); head != plainC1 {
+		t.Fatalf("plain hard: HEAD = %s, want %s", head, plainC1)
+	}
+	if b := strings.TrimSpace(git(t, plain, "branch", "--list", "chithub/backup-*")); b != "" {
+		t.Errorf("no backup requested, but a safety branch appeared: %q", b)
+	}
+	// the dropped tip must still be reachable from the reflog
+	if !strings.Contains(git(t, plain, "reflog"), plainC3[:7]) {
+		t.Error("dropped commit should remain in the reflog")
+	}
+
+	// --- invalid mode is rejected and never moves HEAD ---
+	before := strings.TrimSpace(git(t, bad, "rev-parse", "HEAD"))
+	rb := op(t, srv, "/api/repo/bad/reset", map[string]any{"hash": before, "mode": "nope"})
+	if rb.OK {
+		t.Error("invalid reset mode must fail")
+	}
+	if after := strings.TrimSpace(git(t, bad, "rev-parse", "HEAD")); after != before {
+		t.Error("a rejected reset must not move HEAD")
+	}
+}

@@ -1562,7 +1562,9 @@ const I18N = {
 function t(key) {
   const lang = effLang();
   if (lang && lang !== "en" && I18N[lang] && I18N[lang][key]) return I18N[lang][key];
-  return key;
+  // English fallback: dictionary keys are short lowercase tokens (sync, pull, …);
+  // present them Title-cased so dynamic labels match the rest of the UI.
+  return key ? key[0].toUpperCase() + key.slice(1) : key;
 }
 
 async function loadSettings() {
@@ -1585,11 +1587,15 @@ function applySettings() {
 function effLang() { return SHOW_LANGUAGE ? (SETTINGS.lang || "en") : "en"; }
 
 function applyI18n() {
-  document.querySelectorAll("[data-i18n]").forEach((e) => {
-    const k = e.getAttribute("data-i18n");
-    e.textContent = t(k);
-  });
-  const s = $("#search"); if (s) s.placeholder = t("Filter by name…");
+  // For English we keep the properly-capitalized labels authored in index.html;
+  // only a non-English language swaps them through the dictionary.
+  const en = effLang() === "en";
+  if (!en) {
+    document.querySelectorAll("[data-i18n]").forEach((e) => {
+      e.textContent = t(e.getAttribute("data-i18n"));
+    });
+    const s = $("#search"); if (s) s.placeholder = t("Filter by name…");
+  }
   if (REPOS.length || $("#repoList").children.length) render();
 }
 
@@ -1601,7 +1607,7 @@ async function saveSettings() {
 }
 
 function openSettings() {
-  const s = sheet({ title: t("settings") });
+  const s = sheet({ title: SHOW_LANGUAGE ? t("settings") : "Settings" });
   const f = s.body;
   const row = (label, control) => {
     const r = el("div", "set-row");
@@ -1871,9 +1877,7 @@ function renderHistory(name, list, commits) {
       { label: "Revert this commit", fn: () => commitAction(name, "revert", c) },
       { label: "Cherry-pick onto current", fn: () => commitAction(name, "cherry-pick", c) },
       { label: "—", sep: true },
-      { label: "Reset (soft) to here", fn: () => resetUI(name, c, "soft") },
-      { label: "Reset (mixed) to here", fn: () => resetUI(name, c, "mixed") },
-      { label: "Reset (hard) to here…", fn: () => resetUI(name, c, "hard"), danger: true },
+      { label: "Reset branch to here…", fn: () => resetUI(name, c) },
       { label: "—", sep: true },
       { label: "Tag this commit…", fn: () => tagCommit(name, c) },
     ]));
@@ -1944,12 +1948,93 @@ async function commitAction(name, action, c) {
   if (!(await confirmDialog(verb, `${verb} ${c.short} — “${c.subject}”?`, { okLabel: verb }))) return;
   await runOp(name, `${action} ${c.short}`, () => api("POST", `/api/repo/${enc(name)}/${action}`, { hash: c.hash }));
 }
-async function resetUI(name, c, mode) {
-  const danger = mode === "hard";
-  if (!(await confirmDialog(`Reset (${mode})`,
-    `Move ${name}'s branch to ${c.short}` + (danger ? " and DISCARD all changes after it?\nThis can't be undone." : `?\nChanges after it are kept ${mode === "soft" ? "staged" : "in your working tree"}.`),
-    { okLabel: "Reset " + mode, danger }))) return;
-  await runOp(name, `reset ${mode} ${c.short}`, () => api("POST", `/api/repo/${enc(name)}/reset`, { hash: c.hash, mode }));
+async function resetUI(name, c) {
+  const opts = await resetDialog(name, c);
+  if (!opts) return;
+  await runOp(name, `reset ${opts.mode} ${c.short}`,
+    () => api("POST", `/api/repo/${enc(name)}/reset`, { hash: c.hash, mode: opts.mode, backup: opts.backup }));
+}
+
+// A guided reset dialog: pick soft / mixed / hard, each spelled out in plain
+// language, with an optional safety backup branch so a hard reset never loses
+// work irrecoverably. Resolves to { mode, backup } or null if cancelled.
+function resetDialog(name, c) {
+  return new Promise((resolve) => {
+    const MODES = [
+      { id: "soft", title: "Soft", tag: "keeps your work · staged",
+        desc: "Move the branch to this commit but keep every later change staged and ready to re-commit. Nothing is lost." },
+      { id: "mixed", title: "Mixed", tag: "keeps your work · unstaged",
+        desc: "Move the branch to this commit and keep every later change in your working tree, unstaged. Nothing is lost." },
+      { id: "hard", title: "Hard", tag: "discards your work", danger: true,
+        desc: "Move the branch to this commit and permanently discard every change and commit that came after it." },
+    ];
+    let mode = "mixed";
+    let backup = false;
+
+    const modal = el("div", "modal dialog-modal");
+    const backdrop = el("div", "modal-backdrop");
+    const card = el("div", "modal-card dialog-card reset-card");
+    card.appendChild(el("h3", null, `Reset “${esc(name)}”`));
+    card.appendChild(el("div", "dialog-msg",
+      "Move this branch to the commit below. Choose what happens to the work that comes after it."));
+    card.appendChild(el("div", "reset-target",
+      `<span class="mono reset-target-hash">${esc(c.short)}</span><span class="reset-target-subj">${esc(c.subject)}</span>`));
+
+    const modes = el("div", "reset-modes");
+    const cards = {};
+    for (const m of MODES) {
+      const mc = el("button", "reset-mode" + (m.danger ? " danger" : ""),
+        `<span class="reset-mode-head"><b>${esc(m.title)}</b><span class="reset-mode-tag">${esc(m.tag)}</span></span>
+         <span class="reset-mode-desc">${esc(m.desc)}</span>`);
+      mc.type = "button";
+      mc.onclick = () => { mode = m.id; render(); };
+      cards[m.id] = mc;
+      modes.appendChild(mc);
+    }
+    card.appendChild(modes);
+
+    const warn = el("div", "reset-warn",
+      "⚠ A hard reset deletes uncommitted changes for good. Keep the safety branch on below to stay recoverable.");
+    card.appendChild(warn);
+
+    const safety = el("label", "reset-safety");
+    const sw = el("span", "switch"); sw.appendChild(el("i"));
+    safety.appendChild(sw);
+    safety.appendChild(el("span", "reset-safety-text",
+      `<b>Create a safety backup branch first</b><span>A <code>chithub/backup-…</code> branch will mark your current position so you can always come back.</span>`));
+    safety.onclick = (e) => { e.preventDefault(); backup = !backup; sw.classList.toggle("on", backup); };
+    card.appendChild(safety);
+
+    const actions = el("div", "modal-actions");
+    const cancel = el("button", "btn ghost", "Cancel");
+    const ok = el("button", "btn primary", "Reset");
+    actions.appendChild(cancel); actions.appendChild(ok);
+    card.appendChild(actions);
+
+    function render() {
+      for (const m of MODES) cards[m.id].classList.toggle("sel", m.id === mode);
+      const danger = mode === "hard";
+      warn.classList.toggle("show", danger);
+      ok.className = "btn " + (danger ? "danger" : "primary");
+      ok.textContent = "Reset (" + mode + ")";
+      if (danger && !backup) { backup = true; sw.classList.add("on"); } // default-safe on hard
+    }
+
+    const finish = (val) => { modal.remove(); document.removeEventListener("keydown", onKey, true); resolve(val); };
+    cancel.onclick = () => finish(null);
+    ok.onclick = () => finish({ mode, backup });
+    backdrop.onclick = () => finish(null);
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(null); }
+      else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); finish({ mode, backup }); }
+    };
+    document.addEventListener("keydown", onKey, true);
+
+    modal.appendChild(backdrop); modal.appendChild(card);
+    document.body.appendChild(modal);
+    render();
+    setTimeout(() => ok.focus(), 20);
+  });
 }
 async function tagCommit(name, c) {
   const tag = await promptDialog("Tag commit", { label: `Tag name for ${c.short}`, placeholder: "v1.0.0", okLabel: "Next" });
