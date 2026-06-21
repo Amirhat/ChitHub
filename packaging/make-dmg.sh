@@ -26,6 +26,16 @@ if [ -f packaging/icon.icns ]; then
   cp packaging/icon.icns "$APP/Contents/Resources/icon.icns"
 fi
 
+# Sign the app. With a real Developer ID (MACOS_SIGN_IDENTITY set), use it so the
+# app can also be notarized for a warning-free launch; otherwise ad-hoc sign,
+# which is enough for the app to run cleanly on Apple Silicon (no "damaged"
+# error — the user still right-click → Open once, as it's unsigned by Apple).
+SIGN_ID="${MACOS_SIGN_IDENTITY:--}"
+echo "Signing with identity: $SIGN_ID"
+codesign --force --deep --options runtime --sign "$SIGN_ID" "$APP" 2>/dev/null \
+  || codesign --force --deep --sign - "$APP" \
+  || echo "warning: codesign failed"
+
 DMG="dist/ChitHub-${TAG}.dmg"
 rm -f "$DMG"
 

@@ -148,7 +148,7 @@ func (a *App) handleReview(w http.ResponseWriter, r *http.Request) {
 		if rp.Error != "" {
 			continue
 		}
-		if rp.Dirty || rp.Ahead > 0 || (rp.State == "no-upstream" && rp.LastCommit != nil) {
+		if rp.Dirty || rp.Ahead > 0 {
 			commit = append(commit, rp.Name)
 		}
 		if rp.Behind > 0 {

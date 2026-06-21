@@ -468,9 +468,10 @@ input[type="checkbox"]:focus-visible {
 .collection-row { display: flex; align-items: stretch; border-radius: 7px; }
 .collection-row.active { background: rgba(47,129,247,.12); }
 .collection-row:hover { background: var(--bg-elev2); }
-.collection-pick {
+/* scoped under .collection-menu so they beat the generic `.menu button` rule */
+.collection-menu .collection-pick {
   flex: 1; text-align: left; background: none; border: none; color: var(--text);
-  padding: 8px 10px; border-radius: 7px; display: flex; align-items: center; gap: 9px; min-width: 0;
+  padding: 8px 10px; border-radius: 7px; display: flex; align-items: center; gap: 9px; min-width: 0; width: auto;
 }
 .cr-dot { width: 8px; flex: none; color: var(--accent); font-size: 9px; line-height: 1; }
 .cr-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
@@ -480,9 +481,13 @@ input[type="checkbox"]:focus-visible {
 .cr-meta.missing { color: var(--amber); }
 .cr-path { font-size: 11px; color: var(--text-faint); direction: ltr; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .modal-hint { color: var(--text-dim); font-size: 12.5px; margin: -6px 0 16px; line-height: 1.5; }
-.cr-remove { background: none; border: none; color: var(--text-faint); width: 30px; border-radius: 7px; font-size: 12px; }
-.cr-remove:hover { color: var(--red); background: rgba(248,81,73,.1); }
-.collection-add {
+.collection-menu .cr-remove {
+  background: none; border: none; color: var(--text-faint);
+  width: 32px; flex: none; border-radius: 7px; font-size: 12px;
+  display: flex; align-items: center; justify-content: center;
+}
+.collection-menu .cr-remove:hover { color: var(--red); background: rgba(248,81,73,.1); }
+.collection-menu .collection-add {
   display: block; width: 100%; text-align: left; background: none; border: none; color: var(--accent);
   padding: 9px 10px; border-radius: 7px; font-size: 13px; font-weight: 600; margin-top: 3px;
   border-top: 1px solid var(--border-soft);

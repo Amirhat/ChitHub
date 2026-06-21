@@ -110,6 +110,50 @@ Select repos with the checkboxes (or none = "all visible"), then use the top-bar
 - The web UI is embedded with `go:embed`, so the executable is self-contained —
   no Node, nothing to install.
 
+## Tests
+
+A full end-to-end suite drives the real HTTP API against throwaway git repos
+(local bare repos stand in for remotes, so it runs offline) and asserts the git
+state after every operation — status/scan, the diff endpoint, whole-file and
+**line-level** commits, amend, undo, stash, discard, branch switch + auto-stash,
+clone/fetch/pull/push, collections, the review queues, and commit-view (including
+merge commits). Run it with:
+
+```bash
+go test ./...
+```
+
+CI runs it on every push via `.github/workflows/test.yml`.
+
+## Code signing & notarization
+
+The released `.app`/`.dmg` is **ad-hoc signed** (`codesign --sign -`) during the
+build. That's enough for it to run cleanly on Apple Silicon (no "app is damaged"
+error), but because it isn't signed by an identity Apple trusts, the **first
+launch still needs right-click → Open** once.
+
+To ship a truly warning-free app you need an **Apple Developer account ($99/yr)**:
+
+1. Create a **Developer ID Application** certificate in your account and install
+   it in your login keychain.
+2. In the release workflow, set `MACOS_SIGN_IDENTITY` to that identity name
+   (e.g. `Developer ID Application: Your Name (TEAMID)`) — `make-dmg.sh` already
+   uses it when present.
+3. **Notarize** the `.dmg` after building (Apple scans it; then it opens with no
+   prompt at all):
+
+   ```bash
+   xcrun notarytool submit dist/ChitHub-*.dmg \
+     --apple-id you@example.com --team-id TEAMID --password APP_SPECIFIC_PW --wait
+   xcrun stapler staple dist/ChitHub-*.dmg
+   ```
+
+   Store the Apple ID / team ID / app-specific password as GitHub secrets and add
+   the two commands as a workflow step.
+
+Short version: **ad-hoc (now) = no "damaged" error, one right-click on first open;
+Developer ID + notarization ($99/yr) = zero prompts.**
+
 ## Releasing
 
 Releases are cut by [GoReleaser](https://goreleaser.com) from a tag, via

@@ -236,7 +236,7 @@ function renderRepo(r) {
     actions.appendChild(c);
   }
   const more = actBtn("⋯", "ghost more", null);
-  attachMenu(more, [
+  actions.appendChild(attachMenu(more, [
     { label: "Open details", fn: () => openDrawer(r.name, { commit: true }) },
     { label: "Reveal in Finder", fn: () => doReveal(r.name) },
     { label: "New branch…", fn: () => newBranch(r.name) },
@@ -244,8 +244,7 @@ function renderRepo(r) {
       { label: "Stash changes", fn: () => doStash(r.name, "push") },
       { label: "Discard all changes…", fn: () => doDiscardAll(r.name), danger: true },
     ] : []),
-  ]);
-  actions.appendChild(more);
+  ]));
 
   row.appendChild(pick);
   row.appendChild(main);
@@ -299,6 +298,8 @@ function splitButton(label, kind, mainFn, items) {
   return wrap;
 }
 
+// attachMenu wraps a button + its dropdown menu and returns the wrapper, which
+// the caller must insert into the DOM.
 function attachMenu(btn, items) {
   const wrap = el("span", "split");
   const menu = el("div", "menu");
@@ -309,7 +310,6 @@ function attachMenu(btn, items) {
     menu.appendChild(b);
   }
   btn.onclick = (e) => { e.stopPropagation(); closeAllMenus(); menu.hidden = !menu.hidden; };
-  btn.replaceWith(wrap);
   wrap.appendChild(btn);
   wrap.appendChild(menu);
   return wrap;
@@ -1005,12 +1005,16 @@ async function openShow(name, commit) {
     card.appendChild(el("div", "sub", `${esc(commit.short)} · ${esc(commit.author)} · ${relTime(commit.time)}`));
     const files = data.files || [];
     card.appendChild(el("div", "section-title", `${files.length} file${files.length === 1 ? "" : "s"} changed`));
+    if (!files.length) {
+      card.appendChild(el("div", "clean-note", "No file changes to show (e.g. a merge with no conflicts, or an empty commit)."));
+    }
     for (const fd of files) {
       const wrap = el("div", "show-file");
       wrap.appendChild(el("div", "show-fpath mono", esc(fd.path)));
       const body = el("div", "diff");
       if (fd.binary) body.appendChild(el("div", "diff-msg", "Binary file."));
-      else if (fd.tooLarge) body.appendChild(el("div", "diff-msg", "Diff too large."));
+      else if (fd.tooLarge) body.appendChild(el("div", "diff-msg", "Diff too large to display."));
+      else if (!fd.hunks || !fd.hunks.length) body.appendChild(el("div", "diff-msg", "No textual changes (mode, rename, or empty)."));
       else for (const h of fd.hunks) {
         const block = el("div", "hunk");
         block.appendChild(el("div", "hunk-head", `<span class="hunk-header mono">${esc(h.header)}</span>`));

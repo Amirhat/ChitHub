@@ -343,8 +343,10 @@ func commitShow(root, name, hash string) []FileDiff {
 	if !isHexish(hash) {
 		return nil
 	}
+	// --first-parent makes merge commits show their diff against the first
+	// parent (what the merge brought in) instead of an empty combined diff.
 	out, err := runGit(filepath.Join(root, name), 20*time.Second,
-		"show", "--no-color", "-U3", "--format=", hash)
+		"show", "--first-parent", "--no-color", "-U3", "--format=", hash)
 	if err != nil {
 		return nil
 	}
