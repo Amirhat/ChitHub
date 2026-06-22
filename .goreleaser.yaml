@@ -9,28 +9,43 @@ before:
     - go mod tidy
 
 builds:
-  - id: chithub
+  # macOS is built WITH cgo so it gets the native WKWebView window (own Dock
+  # icon, no Chrome). On the arm64 macOS runner, clang targets each arch via
+  # -arch, which lets us cross-build the amd64 slice too.
+  - id: chithub-darwin
     main: .
     binary: chithub
+    goos: [darwin]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=1
+      - 'CC=clang -arch {{ if eq .Arch "amd64" }}x86_64{{ else }}arm64{{ end }}'
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+  # Linux needs no cgo (it falls back to the browser; see nativewin_stub.go).
+  - id: chithub-linux
+    main: .
+    binary: chithub
+    goos: [linux]
+    goarch: [amd64, arm64]
     env:
       - CGO_ENABLED=0
-    goos:
-      - darwin
-      - linux
-    goarch:
-      - amd64
-      - arm64
+    flags:
+      - -trimpath
     ldflags:
       - -s -w -X main.version={{ .Version }}
 
 # A single macOS universal binary (amd64 + arm64) used for the .app/.dmg too.
 universal_binaries:
   - id: chithub
-    replace: false
+    ids: [chithub-darwin]
+    replace: true
 
 archives:
   - id: chithub
-    ids: [chithub]
+    ids: [chithub, chithub-linux]
     name_template: "chithub_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
