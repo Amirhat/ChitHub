@@ -14,6 +14,10 @@ import (
 type hub struct {
 	mu      sync.Mutex
 	clients map[chan string]struct{}
+	// onCount, if set, is called (outside the lock) with the new client count
+	// whenever a UI window connects or disconnects. Used to drive app-mode
+	// auto-quit so the server exits when the last window closes.
+	onCount func(n int)
 }
 
 func newHub() *hub { return &hub{clients: map[chan string]struct{}{}} }
@@ -22,17 +26,27 @@ func (h *hub) add() chan string {
 	ch := make(chan string, 4)
 	h.mu.Lock()
 	h.clients[ch] = struct{}{}
+	n := len(h.clients)
 	h.mu.Unlock()
+	if h.onCount != nil {
+		h.onCount(n)
+	}
 	return ch
 }
 
 func (h *hub) remove(ch chan string) {
 	h.mu.Lock()
+	changed := false
 	if _, ok := h.clients[ch]; ok {
 		delete(h.clients, ch)
 		close(ch)
+		changed = true
 	}
+	n := len(h.clients)
 	h.mu.Unlock()
+	if changed && h.onCount != nil {
+		h.onCount(n)
+	}
 }
 
 func (h *hub) broadcast(msg string) {

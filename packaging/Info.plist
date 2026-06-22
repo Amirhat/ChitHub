@@ -22,5 +22,11 @@
   <string>11.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <!-- ChitHub's own process draws no native windows (the UI lives in a Chrome
+       app window), so run it as an agent: no dock tile, no endless launch
+       bounce, and no "hung GUI app" that needs Force Quit. The app's lifetime
+       is tied to its UI window instead — see lifecycle.go. -->
+  <key>LSUIElement</key>
+  <true/>
 </dict>
 </plist>

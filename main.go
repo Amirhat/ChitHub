@@ -5,6 +5,7 @@ import (
 	"flag"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -84,16 +85,35 @@ func main() {
 	log.Printf("ChitHub listening on %s", url)
 	log.Printf("Active collection: %s", cfg.Active)
 
+	// Acquire the port up front. If it's already taken, another ChitHub is
+	// almost certainly running — just open a window pointing at it and exit,
+	// instead of failing to launch.
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Printf("Port %s is busy (ChitHub already running?); opening a window there.", cfg.Port)
+		if !noOpen {
+			openBrowser(url)
+		}
+		return
+	}
+
+	srv := &http.Server{
+		Handler:     logRequests(mux),
+		ReadTimeout: 15 * time.Second,
+	}
+
+	// In app mode (real window, not -dev / -no-open) tie the process lifetime to
+	// the UI window so closing it quits the app and frees the port.
+	if !noOpen && devDir == "" {
+		app.armAutoQuit(srv)
+	}
+	installSignalHandlers(srv)
+
 	if !noOpen {
 		go openBrowser(url)
 	}
 
-	srv := &http.Server{
-		Addr:        addr,
-		Handler:     logRequests(mux),
-		ReadTimeout: 15 * time.Second,
-	}
-	if err := srv.ListenAndServe(); err != nil {
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 }

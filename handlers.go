@@ -8,12 +8,23 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type App struct {
 	mu  sync.RWMutex
 	cfg Config
 	hub *hub
+
+	// Lifecycle (app mode only): the process exits shortly after the last UI
+	// window disconnects, so it never lingers holding the port. See lifecycle.go.
+	srv        *http.Server
+	autoQuit   bool
+	quitMu     sync.Mutex
+	quitTimer  *time.Timer
+	quitGrace  time.Duration
+	firstGrace time.Duration
+	onQuit     func(reason string) // overridable in tests; nil ⇒ real shutdown + exit
 }
 
 func (a *App) root() string {
