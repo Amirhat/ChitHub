@@ -25,9 +25,9 @@ type App struct {
 	closing     atomic.Bool // an explicit window-closed beacon was received
 	quitMu      sync.Mutex
 	quitTimer   *time.Timer
-	firstGrace  time.Duration // backstop if no window ever connects
-	dropGrace   time.Duration // SSE dropped (blip/sleep) — tolerate slow reconnects
-	closeGrace  time.Duration // explicit window-closed beacon — quit promptly
+	firstGrace  time.Duration       // backstop if no window ever connects
+	dropGrace   time.Duration       // SSE dropped (blip/sleep) — tolerate slow reconnects
+	closeGrace  time.Duration       // explicit window-closed beacon — quit promptly
 	onQuit      func(reason string) // overridable in tests; nil ⇒ real shutdown + exit
 }
 

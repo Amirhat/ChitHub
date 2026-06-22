@@ -43,9 +43,9 @@ func TestAutoQuitAfterLastWindowCloses(t *testing.T) {
 func TestAutoQuitCancelledByReconnect(t *testing.T) {
 	a, quit := newAutoQuitApp(100 * time.Millisecond)
 	c := a.hub.add()
-	a.hub.remove(c)                 // arm the grace timer
+	a.hub.remove(c) // arm the grace timer
 	time.Sleep(20 * time.Millisecond)
-	_ = a.hub.add()                 // a reload reconnects before the grace elapses
+	_ = a.hub.add() // a reload reconnects before the grace elapses
 
 	select {
 	case r := <-quit:

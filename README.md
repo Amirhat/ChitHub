@@ -173,6 +173,18 @@ first open). For a fully Gatekeeper-clean app, set a `MACOS_SIGN_IDENTITY`
 (Developer ID) secret and add a `notarytool` step — `packaging/make-dmg.sh`
 already uses the identity when present.
 
+## Contributing
+
+Bug reports, feature ideas, and pull requests are all welcome — ChitHub grows
+with what people actually need.
+
+- 🐛 [Report a bug](https://github.com/Amirhat/ChitHub/issues/new?template=bug_report.yml)
+- 💡 [Request a feature](https://github.com/Amirhat/ChitHub/issues/new?template=feature_request.yml)
+- 💬 [Ask a question or share an idea](https://github.com/Amirhat/ChitHub/discussions)
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to set up, build, and test, and
+the [Code of Conduct](CODE_OF_CONDUCT.md) for community guidelines.
+
 ## License
 
 [MIT](LICENSE) © ChitHub contributors

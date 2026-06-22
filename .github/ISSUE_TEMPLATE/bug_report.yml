@@ -1,0 +1,66 @@
+name: 🐛 Bug report
+description: Something isn't working the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to file a bug! Please fill in as much as you can — it makes fixing it much faster.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ChitHub on a folder with…
+        2. Click…
+        3. See…
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: ChitHub version
+      description: "Shown by `chithub -version`, or in the About box."
+      placeholder: v0.1.2
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - ".dmg download"
+        - Homebrew
+        - Built from source
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Terminal output, console errors, or a screenshot if it helps.
+      render: shell
+    validations:
+      required: false

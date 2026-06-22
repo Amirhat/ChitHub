@@ -1,0 +1,34 @@
+name: 💡 Feature request
+description: Suggest an idea or an improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: Have an idea for ChitHub? Tell us about the problem you're trying to solve — that's the most useful part.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would you like ChitHub to do? A rough sketch is fine.
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Mockups, links to how other tools do it, your workflow, etc.
+    validations:
+      required: false
