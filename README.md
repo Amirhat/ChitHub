@@ -28,6 +28,10 @@ It’s a single Go binary with an embedded web UI: no Node, no runtime, nothing 
 install. Git operations shell out to your real `git`, so your existing
 credentials just work.
 
+<div align="center">
+  <img src="docs/screenshot.png" width="840" alt="ChitHub showing a folder of repositories with their ahead/behind/dirty status at a glance" />
+</div>
+
 ## Features
 
 #### At a glance
