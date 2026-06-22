@@ -557,9 +557,14 @@ function renderDrawer() {
 function drawerHead() {
   const d = DRAWER, r = d.info;
   const frag = document.createDocumentFragment();
-  if (REVIEW) frag.appendChild(reviewBar());
-  const close = el("button", "close", "×"); close.onclick = closeDrawer;
-  frag.appendChild(close);
+  if (REVIEW) {
+    frag.appendChild(reviewBar());
+  } else {
+    // In review mode the bar's "Exit" replaces this, and a × here would collide
+    // with it under the sticky header.
+    const close = el("button", "close", "×"); close.onclick = closeDrawer;
+    frag.appendChild(close);
+  }
   frag.appendChild(el("h2", null, esc(d.name)));
   frag.appendChild(el("div", "sub",
     (r.upstream ? `→ ${esc(r.upstream)}` : "no upstream") + (r.remote ? `<br>${esc(r.remote)}` : "")));
@@ -2387,5 +2392,21 @@ function debounce(fn, ms) {
   let h = null;
   return (...a) => { clearTimeout(h); h = setTimeout(() => fn(...a), ms); };
 }
+
+// Native macOS menu bridge: the app's menu bar items call these via the
+// WKWebView's evaluateJavaScript, reusing the exact same actions as the UI.
+function chMenuClick(id) { const e = document.getElementById(id); if (e) e.click(); }
+window.chithubMenu = {
+  addCollection: () => addCollection(),
+  clone:         () => openClone(),
+  palette:       () => openPalette(),
+  settings:      () => openSettings(),
+  refresh:       () => chMenuClick("refreshBtn"),
+  fetchAll:      () => chMenuClick("fetchAllBtn"),
+  pullAll:       () => chMenuClick("pullAllBtn"),
+  pushAll:       () => chMenuClick("pushAllBtn"),
+  review:        () => startReview("commit"),
+  toggleTheme:   () => { SETTINGS.theme = SETTINGS.theme === "light" ? "dark" : "light"; applySettings(); saveSettings(); },
+};
 
 init();

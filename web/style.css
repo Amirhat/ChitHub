@@ -639,7 +639,11 @@ input[type="checkbox"]:focus-visible {
 .branch-switch { position: relative; }
 .branch-current { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; }
 .branch-current .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.branch-menu { min-width: 240px; max-width: 340px; max-height: 320px; overflow-y: auto; }
+/* Open left-aligned (rightward into the drawer): the branch button sits near
+   the drawer's left edge, so a right-aligned menu would spill past it and get
+   clipped by the panel's overflow. */
+.branch-menu { left: 0; right: auto; min-width: 240px; max-width: min(340px, calc(100% - 8px)); max-height: 320px; overflow-y: auto; overflow-x: hidden; }
+.branch-menu .mono { min-width: 0; }
 .branch-menu button { display: flex; align-items: center; gap: 8px; }
 .branch-menu .bm-dot { width: 9px; flex: none; color: var(--accent); font-size: 9px; }
 .branch-menu .bm-active { background: rgba(47, 129, 247, .1); }
