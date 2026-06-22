@@ -85,20 +85,24 @@ func main() {
 	log.Printf("ChitHub listening on %s", url)
 	log.Printf("Active collection: %s", cfg.Active)
 
-	// Acquire the port up front. If it's already taken, another ChitHub is
-	// almost certainly running — just open a window pointing at it and exit,
-	// instead of failing to launch.
+	// Acquire the port up front. If it's already taken, check whether it's a
+	// running ChitHub: if so, just open a window pointing at it and exit; if
+	// it's some unrelated process, fail with a clear message instead of opening
+	// a browser to whatever is there.
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Printf("Port %s is busy (ChitHub already running?); opening a window there.", cfg.Port)
-		if !noOpen {
-			openBrowser(url)
+		if isChitHub(url) {
+			log.Printf("ChitHub is already running at %s; opening a window there.", url)
+			if !noOpen {
+				openBrowser(url)
+			}
+			return
 		}
-		return
+		log.Fatalf("Port %s is in use by another process. Start ChitHub on a different port with -port.", cfg.Port)
 	}
 
 	srv := &http.Server{
-		Handler:     logRequests(mux),
+		Handler:     logRequests(app.trackActivity(mux)),
 		ReadTimeout: 15 * time.Second,
 	}
 
@@ -150,7 +154,9 @@ func openBrowser(url string) {
 				return
 			}
 		}
-		_ = exec.Command("open", url).Start()
+		if err := exec.Command("open", url).Start(); err != nil {
+			log.Printf("Could not open a browser automatically; open %s manually.", url)
+		}
 		return
 	}
 

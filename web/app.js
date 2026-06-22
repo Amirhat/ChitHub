@@ -1676,6 +1676,13 @@ function connectEvents() {
     evtSource.onerror = () => { /* EventSource auto-reconnects */ };
   } catch { /* SSE unsupported */ }
 }
+
+// Tell the server the window is closing so it can quit promptly (in app mode)
+// rather than waiting out the longer SSE-drop grace. Harmless in dev/browser
+// mode, where the server ignores it. `pagehide` is the reliable unload hook.
+window.addEventListener("pagehide", () => {
+  try { navigator.sendBeacon("/api/window-closed"); } catch { /* ignore */ }
+});
 function scheduleLiveRefresh() {
   clearTimeout(refreshDebounce);
   refreshDebounce = setTimeout(() => {

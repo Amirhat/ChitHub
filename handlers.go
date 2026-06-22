@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -18,13 +19,16 @@ type App struct {
 
 	// Lifecycle (app mode only): the process exits shortly after the last UI
 	// window disconnects, so it never lingers holding the port. See lifecycle.go.
-	srv        *http.Server
-	autoQuit   bool
-	quitMu     sync.Mutex
-	quitTimer  *time.Timer
-	quitGrace  time.Duration
-	firstGrace time.Duration
-	onQuit     func(reason string) // overridable in tests; nil ⇒ real shutdown + exit
+	srv         *http.Server
+	appMode     atomic.Bool // window-tied shutdown is armed
+	sawActivity atomic.Bool // first HTTP request seen (a window actually opened)
+	closing     atomic.Bool // an explicit window-closed beacon was received
+	quitMu      sync.Mutex
+	quitTimer   *time.Timer
+	firstGrace  time.Duration // backstop if no window ever connects
+	dropGrace   time.Duration // SSE dropped (blip/sleep) — tolerate slow reconnects
+	closeGrace  time.Duration // explicit window-closed beacon — quit promptly
+	onQuit      func(reason string) // overridable in tests; nil ⇒ real shutdown + exit
 }
 
 func (a *App) root() string {
@@ -60,6 +64,7 @@ func (a *App) routes(mux *http.ServeMux) {
 
 	// live updates + preferences
 	mux.HandleFunc("GET /api/events", a.handleEvents)
+	mux.HandleFunc("POST /api/window-closed", a.handleWindowClosed)
 	mux.HandleFunc("GET /api/settings", a.handleGetSettings)
 	mux.HandleFunc("POST /api/settings", a.handleSetSettings)
 	mux.HandleFunc("GET /api/update-check", a.handleUpdateCheck)

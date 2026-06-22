@@ -27,9 +27,10 @@ func (h *hub) add() chan string {
 	h.mu.Lock()
 	h.clients[ch] = struct{}{}
 	n := len(h.clients)
+	cb := h.onCount
 	h.mu.Unlock()
-	if h.onCount != nil {
-		h.onCount(n)
+	if cb != nil {
+		cb(n)
 	}
 	return ch
 }
@@ -43,9 +44,10 @@ func (h *hub) remove(ch chan string) {
 		changed = true
 	}
 	n := len(h.clients)
+	cb := h.onCount
 	h.mu.Unlock()
-	if changed && h.onCount != nil {
-		h.onCount(n)
+	if changed && cb != nil {
+		cb(n)
 	}
 }
 
