@@ -27,12 +27,14 @@ func main() {
 		noOpen   bool
 		devDir   string
 		showVer  bool
+		browser  bool
 	)
 	flag.StringVar(&port, "port", "", "port to listen on (overrides saved config)")
 	flag.StringVar(&rootFlag, "root", "", "root folder containing repositories (overrides saved config)")
-	flag.BoolVar(&noOpen, "no-open", false, "do not open a browser window on start")
+	flag.BoolVar(&noOpen, "no-open", false, "do not open a window or browser on start")
 	flag.StringVar(&devDir, "dev", "", "serve the web UI from this directory instead of the embedded copy (development)")
 	flag.BoolVar(&showVer, "version", false, "print version and exit")
+	flag.BoolVar(&browser, "browser", false, "open the UI in your web browser instead of the native app window")
 	flag.Parse()
 
 	if showVer {
@@ -82,19 +84,22 @@ func main() {
 	addr := "127.0.0.1:" + cfg.Port
 	url := "http://" + addr
 
+	// nativeMode: show the UI in our own native window (own Dock icon, no Chrome)
+	// rather than launching a browser. macOS only; -browser / -dev / -no-open opt out.
+	nativeMode := !noOpen && devDir == "" && !browser && nativeWindowSupported()
+
 	log.Printf("ChitHub listening on %s", url)
 	log.Printf("Active collection: %s", cfg.Active)
 
 	// Acquire the port up front. If it's already taken, check whether it's a
-	// running ChitHub: if so, just open a window pointing at it and exit; if
-	// it's some unrelated process, fail with a clear message instead of opening
-	// a browser to whatever is there.
+	// running ChitHub: if so, hand off and exit; if it's an unrelated process,
+	// fail with a clear message rather than pointing the UI at whatever is there.
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		if isChitHub(url) {
-			log.Printf("ChitHub is already running at %s; opening a window there.", url)
-			if !noOpen {
-				openBrowser(url)
+			log.Printf("ChitHub is already running at %s.", url)
+			if !nativeMode && !noOpen {
+				openBrowser(url) // browser mode: just open another tab/window
 			}
 			return
 		}
@@ -105,18 +110,31 @@ func main() {
 		Handler:     logRequests(app.trackActivity(mux)),
 		ReadTimeout: 15 * time.Second,
 	}
+	installSignalHandlers(srv)
 
-	// In app mode (real window, not -dev / -no-open) tie the process lifetime to
-	// the UI window so closing it quits the app and frees the port.
+	// Tie the process lifetime to the UI window via the SSE connection. In
+	// native mode the window delegate quits immediately on close; this is the
+	// belt-and-suspenders backup (and the primary mechanism in browser mode).
 	if !noOpen && devDir == "" {
 		app.armAutoQuit(srv)
 	}
-	installSignalHandlers(srv)
+
+	if nativeMode {
+		// Serve in the background and run the native window on the main thread;
+		// closing the window quits the app (and frees the port for relaunch).
+		go func() {
+			if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+				log.Fatal(err)
+			}
+		}()
+		time.Sleep(150 * time.Millisecond) // let Serve start accepting before the window loads
+		runNativeWindow(url, "ChitHub", appIcon(), 1280, 860)
+		return
+	}
 
 	if !noOpen {
 		go openBrowser(url)
 	}
-
 	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}

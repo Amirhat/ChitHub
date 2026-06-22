@@ -124,9 +124,14 @@ Command-line flags override the saved config:
 |------|-------------|
 | `-root <dir>` | Scan a specific folder |
 | `-port <n>` | Listen on a different port (default `7171`) |
+| `-browser` | Open the UI in your web browser instead of the native window |
 | `-no-open` | Don’t open a window on start |
 | `-dev <dir>` | Serve the UI from disk instead of the embedded copy |
 | `-version` | Print the version and exit |
+
+On macOS, ChitHub opens in a **native window** with its own Dock icon — closing
+the window quits the app. Pass `-browser` (or run on Linux) to open it as a
+browser window instead.
 
 ## Building from source
 
